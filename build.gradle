@@ -36,9 +36,13 @@ test {
 	useJUnitPlatform()
 }
 
+// Excludes bootstrap-only code. DO NOT use to hide real logic
+def jacocoExcludes = ['**/DsBackendApplication.class']
+
 jacocoTestReport {
 	dependsOn test
 
+	classDirectories.setFrom(sourceSets.main.output.classesDirs.asFileTree.matching { exclude jacocoExcludes })
 	reports {
 		xml.required = true
 		html.required = true
@@ -49,6 +53,7 @@ jacocoTestReport {
 jacocoTestCoverageVerification {
 	dependsOn jacocoTestReport
 
+	classDirectories.setFrom(sourceSets.main.output.classesDirs.asFileTree.matching { exclude jacocoExcludes })
 	violationRules {
 		rule {
 			limit {
