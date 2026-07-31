@@ -67,6 +67,6 @@ jacocoTestCoverageVerification {
 
 spotless {
 	java {
-		googleJavaFormat()
+		googleJavaFormat("1.28.0")
 	}
 }
