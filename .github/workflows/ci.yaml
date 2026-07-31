@@ -20,6 +20,9 @@ jobs:
           java-version: 26
           cache: gradle
 
+      - name: 'DEBUG: Show Java version'
+        run: java -version
+
       - name: Grant execute permission
         run: chmod +x gradlew
 
