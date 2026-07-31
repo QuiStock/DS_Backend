@@ -34,7 +34,6 @@ dependencies {
 
 test {
 	useJUnitPlatform()
-	finalizedBy jacocoTestReport
 }
 
 jacocoTestReport {
@@ -44,6 +43,20 @@ jacocoTestReport {
 		xml.required = true
 		html.required = true
 		csv.required = false
+	}
+}
+
+jacocoTestCoverageVerification {
+	dependsOn jacocoTestReport
+
+	violationRules {
+		rule {
+			limit {
+				counter = "LINE"
+				value = "COVEREDRATIO"
+				minimum = 0.80
+			}
+		}
 	}
 }
 
