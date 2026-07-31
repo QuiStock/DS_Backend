@@ -1,0 +1,8 @@
+pre-commit:
+  parallel: true
+  commands:
+    spotless:
+      run: ./gradlew spotlessCheck
+
+    checkstyle:
+      run: ./gradlew checkstyleMain
