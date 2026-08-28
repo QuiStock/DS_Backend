@@ -58,7 +58,7 @@ class ProdutoServiceTest {
 
     ProdutoDTO produto = produtoService.consolidarProdutos(List.of(lote)).get(0);
 
-    assertThat(produto.id()).isEqualTo("PROD001:FIL001");
+    assertThat(produto.id()).isEqualTo("PROD001:Loja Santana");
     assertThat(produto.sku()).isEqualTo("PROD001");
     assertThat(produto.nome()).isEqualTo("Leite Integral 1L");
     assertThat(produto.categoria()).isEqualTo("Laticinios");
@@ -170,7 +170,7 @@ class ProdutoServiceTest {
     assertThat(produtos).hasSize(2);
     assertThat(produtos)
         .extracting(ProdutoDTO::id)
-        .containsExactly("PROD001:FIL001", "PROD001:FIL002");
+        .containsExactly("PROD001:Loja Santana", "PROD001:Loja Centro");
     assertThat(produtos).extracting(ProdutoDTO::estoqueAtual).containsExactly(50, 70);
   }
 
@@ -294,7 +294,6 @@ class ProdutoServiceTest {
             "quantidade": "50",
             "preco": "7.99",
             "custo": "5.20",
-            "codigo_filial_erp": "FIL001",
             "filial": "Loja Santana",
             "certificado_qualidade": true,
             "data_entrada": "2026-08-20",
@@ -314,7 +313,6 @@ class ProdutoServiceTest {
             "quantidade": "20",
             "preco": "8.19",
             "custo": "5.40",
-            "codigo_filial_erp": "FIL001",
             "filial": "Loja Santana",
             "certificado_qualidade": true,
             "data_entrada": "2026-08-21",
@@ -334,7 +332,6 @@ class ProdutoServiceTest {
             "quantidade": "0",
             "preco": "5.99",
             "custo": "3.20",
-            "codigo_filial_erp": "FIL002",
             "filial": "Loja Centro",
             "certificado_qualidade": true,
             "data_entrada": "2026-08-22",
@@ -348,13 +345,13 @@ class ProdutoServiceTest {
 
     assertThat(produtoService.listarProdutos("Loja Santana", null, null))
         .extracting(ProdutoDTO::id)
-        .containsExactly("PROD001:FIL001");
+        .containsExactly("PROD001:Loja Santana");
     assertThat(produtoService.listarProdutos(null, "Bebidas", null))
         .extracting(ProdutoDTO::id)
-        .containsExactly("PROD002:FIL002");
+        .containsExactly("PROD002:Loja Centro");
     assertThat(produtoService.listarProdutos(null, null, false))
         .extracting(ProdutoDTO::id)
-        .containsExactly("PROD002:FIL002");
+        .containsExactly("PROD002:Loja Centro");
   }
 
   @Test
@@ -417,7 +414,11 @@ class ProdutoServiceTest {
   }
 
   private LoteErpDTO lote(
-      String id, String codigoProduto, String codigoFilial, String filial, Object... valores) {
+      String id,
+      String codigoProduto,
+      String codigoFilialLegado,
+      String filial,
+      Object... valores) {
     Object dataEntrada = valores[0];
     Object dataValidade = valores[1];
     Object quantidade = valores[2];
@@ -439,7 +440,6 @@ class ProdutoServiceTest {
         quantidade,
         preco,
         custo,
-        codigoFilial,
         filial,
         true,
         dataEntrada,

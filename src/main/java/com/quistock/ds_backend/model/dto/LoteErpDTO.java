@@ -13,7 +13,6 @@ public record LoteErpDTO(
     Object quantidade,
     Object preco,
     Object custo,
-    @JsonProperty("codigo_filial_erp") String codigoFilialErp,
     String filial,
     @JsonProperty("certificado_qualidade") Boolean certificadoQualidade,
     @JsonProperty("data_entrada") Object dataEntrada,

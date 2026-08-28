@@ -102,14 +102,14 @@ public class ProdutoService {
   }
 
   private ChaveProdutoFilial criarChave(LoteErpDTO lote) {
-    return new ChaveProdutoFilial(lote.codigoProdutoErp(), lote.codigoFilialErp());
+    return new ChaveProdutoFilial(lote.codigoProdutoErp(), lote.filial());
   }
 
   private String criarIdPublico(ChaveProdutoFilial chave) {
     return "%s:%s"
         .formatted(
             Objects.toString(chave.codigoProdutoErp(), ""),
-            Objects.toString(chave.codigoFilialErp(), ""));
+            Objects.toString(chave.filial(), ""));
   }
 
   private int somar(List<LoteErpDTO> lotes, Function<LoteErpDTO, Object> campo) {
@@ -133,7 +133,7 @@ public class ProdutoService {
           "Valores divergentes para {} no agrupamento {}:{}; usando o maior valor: {}",
           nomeCampo,
           chave.codigoProdutoErp(),
-          chave.codigoFilialErp(),
+          chave.filial(),
           valores.last());
     }
 
@@ -166,5 +166,5 @@ public class ProdutoService {
     return lotes.stream().max(comparator).orElseThrow();
   }
 
-  private record ChaveProdutoFilial(String codigoProdutoErp, String codigoFilialErp) {}
+  private record ChaveProdutoFilial(String codigoProdutoErp, String filial) {}
 }

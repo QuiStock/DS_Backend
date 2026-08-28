@@ -32,7 +32,7 @@ class ProdutoControllerTest {
         .perform(get("/api/produtos").contextPath("/api"))
         .andExpect(status().isOk())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-        .andExpect(jsonPath("$[0].id").value("PROD001:FIL001"))
+        .andExpect(jsonPath("$[0].id").value("PROD001:Loja Santana"))
         .andExpect(jsonPath("$[0].estoque_atual").value(71))
         .andExpect(jsonPath("$[0].num_lote").doesNotExist());
   }
@@ -63,7 +63,7 @@ class ProdutoControllerTest {
 
   private ProdutoDTO produto() {
     return new ProdutoDTO(
-        "PROD001:FIL001",
+        "PROD001:Loja Santana",
         "PROD001",
         "Leite Integral 1L",
         "Laticinios",

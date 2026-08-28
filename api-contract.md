@@ -40,7 +40,7 @@ Resposta 200:
 
 [
   {
-    "id": "PROD001:FIL001",
+    "id": "PROD001:Loja Santana",
     "sku": "PROD001",
     "nome": "Leite Integral 1L",
     "categoria": "Laticinios",
@@ -66,7 +66,7 @@ registros antes de montar a resposta pública.
 A chave de agrupamento é composta por:
 
 ```text
-codigo_produto_erp + codigo_filial_erp
+codigo_produto_erp + filial
 ```
 
 O mesmo produto em filiais diferentes resulta em produtos consolidados diferentes.
@@ -87,7 +87,7 @@ Regras de transformação:
 - `preco`: vem do lote mais recente segundo `data_entrada`.
 - `custo`: vem do lote mais recente segundo `data_entrada`.
 - `status`: é `true` quando o estoque consolidado é maior que zero.
-- `id`: nesta etapa sem persistência, é gerado de forma determinística como `codigo_produto_erp:codigo_filial_erp`.
+- `id`: nesta etapa sem persistência, é gerado de forma determinística como `codigo_produto_erp:filial`.
 
 Campos internos do lote, como `num_lote`, `certificado_qualidade`, `data_entrada`,
 `data_validade` e `unidade_medida`, não são expostos nessa rota pública.
