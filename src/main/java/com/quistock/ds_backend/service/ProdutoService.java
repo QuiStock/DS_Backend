@@ -153,8 +153,7 @@ public class ProdutoService {
       return null;
     }
 
-    return Math.toIntExact(
-        ChronoUnit.DAYS.between(LocalDate.now(clock), validadeMaisProxima));
+    return Math.toIntExact(ChronoUnit.DAYS.between(LocalDate.now(clock), validadeMaisProxima));
   }
 
   private LoteErpDTO encontrarLoteMaisRecente(List<LoteErpDTO> lotes) {

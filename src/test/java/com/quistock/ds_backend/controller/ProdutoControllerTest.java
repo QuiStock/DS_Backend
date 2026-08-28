@@ -52,8 +52,7 @@ class ProdutoControllerTest {
         .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.erro").value("ERP_INDISPONIVEL"))
         .andExpect(
-            jsonPath("$.mensagem")
-                .value("Não foi possível conectar com a API externa do ERP."));
+            jsonPath("$.mensagem").value("Não foi possível conectar com a API externa do ERP."));
   }
 
   private MockMvc criarMockMvc(ProdutoService produtoService) {
