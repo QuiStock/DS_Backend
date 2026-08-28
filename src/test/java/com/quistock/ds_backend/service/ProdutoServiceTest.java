@@ -417,19 +417,17 @@ class ProdutoServiceTest {
   }
 
   private LoteErpDTO lote(
-      String id,
-      String codigoProduto,
-      String codigoFilial,
-      String filial,
-      Object dataEntrada,
-      Object dataValidade,
-      Object quantidade,
-      Object preco,
-      Object custo,
-      Object vendas7d,
-      Object vendas30d,
-      Object estoqueMinimo,
-      Object leadTime) {
+      String id, String codigoProduto, String codigoFilial, String filial, Object... valores) {
+    Object dataEntrada = valores[0];
+    Object dataValidade = valores[1];
+    Object quantidade = valores[2];
+    Object preco = valores[3];
+    Object custo = valores[4];
+    Object vendas7d = valores[5];
+    Object vendas30d = valores[6];
+    Object estoqueMinimo = valores[7];
+    Object leadTime = valores[8];
+
     return new LoteErpDTO(
         id,
         codigoProduto,
