@@ -89,13 +89,11 @@ public class ProdutoService {
         primeiroLote.nomeProduto(),
         primeiroLote.categoria(),
         estoqueAtual,
-        resolverConfiguracao(
-            lotesDoProduto, LoteErpDTO::estoqueMinimo, "estoque_minimo", chave),
+        resolverConfiguracao(lotesDoProduto, LoteErpDTO::estoqueMinimo, "estoque_minimo", chave),
         vendas7d,
         vendas30d,
         calcularDiasValidade(lotesDoProduto),
-        resolverConfiguracao(
-            lotesDoProduto, LoteErpDTO::leadTimeDias, "lead_time_dias", chave),
+        resolverConfiguracao(lotesDoProduto, LoteErpDTO::leadTimeDias, "lead_time_dias", chave),
         ErpValueParser.toBigDecimal(loteMaisRecente.preco()),
         ErpValueParser.toBigDecimal(loteMaisRecente.custo()),
         ErpValueParser.toInstant(loteMaisRecente.dataEntrada()),
@@ -108,9 +106,10 @@ public class ProdutoService {
   }
 
   private String criarIdPublico(ChaveProdutoFilial chave) {
-    return "%s:%s".formatted(
-        Objects.toString(chave.codigoProdutoErp(), ""),
-        Objects.toString(chave.codigoFilialErp(), ""));
+    return "%s:%s"
+        .formatted(
+            Objects.toString(chave.codigoProdutoErp(), ""),
+            Objects.toString(chave.codigoFilialErp(), ""));
   }
 
   private int somar(List<LoteErpDTO> lotes, Function<LoteErpDTO, Object> campo) {
@@ -122,11 +121,12 @@ public class ProdutoService {
       Function<LoteErpDTO, Object> campo,
       String nomeCampo,
       ChaveProdutoFilial chave) {
-    TreeSet<Integer> valores = lotes.stream()
-        .map(campo)
-        .map(ErpValueParser::toInteger)
-        .filter(Objects::nonNull)
-        .collect(Collectors.toCollection(TreeSet::new));
+    TreeSet<Integer> valores =
+        lotes.stream()
+            .map(campo)
+            .map(ErpValueParser::toInteger)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toCollection(TreeSet::new));
 
     if (valores.size() > 1) {
       LOGGER.warn(
@@ -141,29 +141,31 @@ public class ProdutoService {
   }
 
   private Integer calcularDiasValidade(List<LoteErpDTO> lotes) {
-    LocalDate validadeMaisProxima = lotes.stream()
-        .filter(lote -> ErpValueParser.toIntegerOrZero(lote.quantidade()) > 0)
-        .map(lote -> ErpValueParser.toLocalDate(lote.dataValidade()))
-        .filter(Objects::nonNull)
-        .min(Comparator.naturalOrder())
-        .orElse(null);
+    LocalDate validadeMaisProxima =
+        lotes.stream()
+            .filter(lote -> ErpValueParser.toIntegerOrZero(lote.quantidade()) > 0)
+            .map(lote -> ErpValueParser.toLocalDate(lote.dataValidade()))
+            .filter(Objects::nonNull)
+            .min(Comparator.naturalOrder())
+            .orElse(null);
 
     if (validadeMaisProxima == null) {
       return null;
     }
 
-    return Math.toIntExact(ChronoUnit.DAYS.between(LocalDate.now(clock), validadeMaisProxima));
+    return Math.toIntExact(
+        ChronoUnit.DAYS.between(LocalDate.now(clock), validadeMaisProxima));
   }
 
   private LoteErpDTO encontrarLoteMaisRecente(List<LoteErpDTO> lotes) {
-    Comparator<LoteErpDTO> comparator = Comparator.comparing(
-        (LoteErpDTO lote) -> ErpValueParser.toLocalDate(lote.dataEntrada()),
-        Comparator.nullsFirst(Comparator.naturalOrder()))
-        .thenComparing(lote -> Objects.toString(lote.id(), ""));
+    Comparator<LoteErpDTO> comparator =
+        Comparator.comparing(
+                (LoteErpDTO lote) -> ErpValueParser.toLocalDate(lote.dataEntrada()),
+                Comparator.nullsFirst(Comparator.naturalOrder()))
+            .thenComparing(lote -> Objects.toString(lote.id(), ""));
 
     return lotes.stream().max(comparator).orElseThrow();
   }
 
-  private record ChaveProdutoFilial(String codigoProdutoErp, String codigoFilialErp) {
-  }
+  private record ChaveProdutoFilial(String codigoProdutoErp, String codigoFilialErp) {}
 }
