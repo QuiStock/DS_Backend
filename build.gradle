@@ -43,11 +43,15 @@ test {
 
 // Excludes bootstrap-only code. DO NOT use to hide real logic
 def jacocoExcludes = ['**/DsBackendApplication.class']
+def coverageClasses = sourceSets.main.output.classesDirs.asFileTree.matching { exclude jacocoExcludes }
+def downloadedCoverageData = fileTree(layout.buildDirectory.dir('coverage-input')) {
+	include '**/*.exec', '**/*.ec'
+}
 
 jacocoTestReport {
 	dependsOn test
 
-	classDirectories.setFrom(sourceSets.main.output.classesDirs.asFileTree.matching { exclude jacocoExcludes })
+	classDirectories.setFrom(coverageClasses)
 	reports {
 		xml.required = true
 		html.required = true
@@ -58,7 +62,7 @@ jacocoTestReport {
 jacocoTestCoverageVerification {
 	dependsOn jacocoTestReport
 
-	classDirectories.setFrom(sourceSets.main.output.classesDirs.asFileTree.matching { exclude jacocoExcludes })
+	classDirectories.setFrom(coverageClasses)
 	violationRules {
 		rule {
 			limit {
@@ -67,6 +71,43 @@ jacocoTestCoverageVerification {
 				minimum = 0.80
 			}
 		}
+	}
+}
+
+tasks.register('jacocoAggregateReport', JacocoReport) {
+	description = 'Generate a JaCoCo report from coverage downloaded by CI.'
+	dependsOn classes
+	classDirectories.setFrom(coverageClasses)
+	sourceDirectories.setFrom(sourceSets.main.allSource.srcDirs)
+	executionData.setFrom(downloadedCoverageData)
+	reports {
+		xml.required = true
+		html.required = true
+		csv.required = false
+	}
+}
+
+tasks.register('jacocoAggregateCoverageVerification', JacocoCoverageVerification) {
+	description = 'Validate coverage downloaded by CI.'
+	dependsOn classes
+	classDirectories.setFrom(coverageClasses)
+	sourceDirectories.setFrom(sourceSets.main.allSource.srcDirs)
+	executionData.setFrom(downloadedCoverageData)
+	violationRules {
+		rule {
+			limit {
+				counter = 'LINE'
+				value = 'COVEREDRATIO'
+				minimum = 0.80
+			}
+		}
+	}
+	doFirst {
+		def coverageFiles = downloadedCoverageData.files.findAll { it.exists() }
+		if (coverageFiles.empty) {
+			throw new GradleException('No JaCoCo execution data found in build/coverage-input')
+		}
+		logger.lifecycle('Validating coverage using: {}', coverageFiles.join(', '))
 	}
 }
 

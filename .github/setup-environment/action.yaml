@@ -1,16 +1,13 @@
 name: Setup Environment
-description: Clones repository, sets up Java environment and handlews permissions
+description: Sets up Java and Gradle wrapper permissions
 runs:
   using: composite
   steps:
-    - name: Checkout
-      uses: actions/checkout@v7
-
     - name: Setup Java
       uses: actions/setup-java@v6
       with:
         distribution: temurin
-        java-version: {{ env.JAVA_VERSION }}
+        java-version: ${{ env.JAVA_VERSION }}
         cache: gradle
 
     - name: Grant execution permission to Gradle Wrapper

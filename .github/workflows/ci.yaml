@@ -16,16 +16,18 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      - uses: actions/checkout@v7
       - uses: ./.github/setup-environment
 
       - name: Build
-        run: ./gradlew build
+        run: ./gradlew assemble
 
   lint-and-code-style:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
+      - uses: actions/checkout@v7
       - uses: ./.github/setup-environment
 
       - name: Spotless Check
@@ -34,15 +36,60 @@ jobs:
       - name: Checkstyle Check
         run: ./gradlew checkstyleMain
 
-  tests-and-coverage:
+  unit-tests:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
+      - uses: actions/checkout@v7
       - uses: ./.github/setup-environment
 
       - name: Run tests
         run: ./gradlew test
 
-      - name: Check test coverage
-        run: ./gradlew jacocoTestCoverageVerification
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-test-reports
+          path: build/reports/tests
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload unit coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-unit
+          path: build/jacoco/test.exec
+          if-no-files-found: error
+          retention-days: 1
+
+  test-coverage-validation:
+    needs: unit-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/setup-environment
+
+      - name: Download unit test coverage
+        uses: actions/download-artifact@v7
+        with:
+          name: coverage-unit
+          path: build/coverage-input
+
+      - name: Generate combined coverage report
+        run: ./gradlew jacocoAggregateReport --stacktrace
+
+      - name: Validate combined coverage
+        run: ./gradlew jacocoAggregateCoverageVerification --stacktrace
+
+      - name: Upload combined JaCoCo report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jacoco-combined-report
+          path: build/reports/jacoco/jacocoAggregateReport
+          if-no-files-found: warn
+          retention-days: 7
