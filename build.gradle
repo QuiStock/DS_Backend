@@ -5,6 +5,7 @@ plugins {
 
 	id 'com.diffplug.spotless' version '7.0.2'
 	id 'checkstyle'
+	id 'pmd'
 	id 'jacoco'
 }
 
@@ -39,6 +40,11 @@ dependencies {
 
 test {
 	useJUnitPlatform()
+}
+
+pmd {
+	toolVersion = '7.16.0'
+	ruleSets = ['category/java/errorprone.xml', 'category/java/bestpractices.xml', 'category/java/design.xml']
 }
 
 // Excludes bootstrap-only code. DO NOT use to hide real logic

@@ -38,6 +38,27 @@ jobs:
       - name: Checkstyle Check
         run: ./gradlew checkstyleMain
 
+  code-smell:
+    name: Code smell analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/setup-environment
+
+      - name: PMD analysis
+        run: ./gradlew pmdMain
+
+      - name: Upload PMD reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pmd-reports
+          path: build/reports/pmd/main.*
+          if-no-files-found: warn
+          retention-days: 7
+
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-24.04
