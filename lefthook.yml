@@ -1,5 +1,4 @@
-pre-commit:
-  parallel: true
+pre-push:
   commands:
     spotless:
       run: ./gradlew spotlessCheck
