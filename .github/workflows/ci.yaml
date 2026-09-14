@@ -15,17 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: gradle
-
-      - name: Grant execute permission
-        run: chmod +x gradlew
+      - uses: ./.github/setup-environment
 
       - name: Build
         run: ./gradlew build
@@ -34,17 +24,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: gradle
-
-      - name: Grant execute permission
-        run: chmod +x gradlew
+      - uses: ./.github/setup-environment
 
       - name: Spotless Check
         run: ./gradlew spotlessCheck
@@ -56,17 +36,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: gradle
-
-      - name: Grant execute permission
-        run: chmod +x gradlew
+      - uses: ./.github/setup-environment
 
       - name: Run tests
         run: ./gradlew test
