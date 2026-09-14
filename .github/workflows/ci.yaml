@@ -13,6 +13,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - uses: ./.github/setup-environment
@@ -22,6 +23,7 @@ jobs:
 
   lint-and-code-style:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - uses: ./.github/setup-environment
@@ -34,6 +36,7 @@ jobs:
 
   tests-and-coverage:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - uses: ./.github/setup-environment
