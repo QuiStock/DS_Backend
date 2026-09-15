@@ -20,7 +20,7 @@ public final class ErpValueParser {
     try {
       return new BigDecimal(value.toString().trim()).intValueExact();
     } catch (NumberFormatException | ArithmeticException exception) {
-      throw new IllegalArgumentException("Valor inteiro inválido recebido do ERP.", exception);
+      throw new IllegalArgumentException("Invalid integer value received from the ERP.", exception);
     }
   }
 
@@ -37,7 +37,7 @@ public final class ErpValueParser {
     try {
       return new BigDecimal(value.toString().trim());
     } catch (NumberFormatException exception) {
-      throw new IllegalArgumentException("Valor decimal inválido recebido do ERP.", exception);
+      throw new IllegalArgumentException("Invalid decimal value received from the ERP.", exception);
     }
   }
 
@@ -67,7 +67,7 @@ public final class ErpValueParser {
         return LocalDate.parse(text).atStartOfDay(ZoneOffset.UTC).toInstant();
       } catch (DateTimeParseException dateException) {
         exception.addSuppressed(dateException);
-        throw new IllegalArgumentException("Data inválida recebida do ERP.", exception);
+        throw new IllegalArgumentException("Invalid date received from the ERP.", exception);
       }
     }
   }
