@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.quistock.ds_backend.exception.ErpIntegrationException;
+import com.quistock.ds_backend.exception.ProdutoNotFoundException;
 import com.quistock.ds_backend.handler.ApiExceptionHandler;
 import com.quistock.ds_backend.model.dto.ProdutoDTO;
 import com.quistock.ds_backend.service.ProdutoService;
@@ -53,6 +54,37 @@ class ProdutoControllerTest {
         .andExpect(jsonPath("$.erro").value("ERP_INDISPONIVEL"))
         .andExpect(
             jsonPath("$.mensagem").value("Não foi possível conectar com a API externa do ERP."));
+  }
+
+  @Test
+  void deveBuscarProdutoPorIdNaRotaPublica() throws Exception {
+    ProdutoService produtoService = mock(ProdutoService.class);
+    when(produtoService.buscarProdutoPorId("PROD001:FIL001")).thenReturn(produto());
+
+    MockMvc mockMvc = criarMockMvc(produtoService);
+
+    mockMvc
+        .perform(get("/api/produtos/PROD001:FIL001").contextPath("/api"))
+        .andExpect(status().isOk())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+        .andExpect(jsonPath("$.id").value("PROD001:FIL001"))
+        .andExpect(jsonPath("$.sku").value("PROD001"));
+  }
+
+  @Test
+  void deveRetornar404QuandoProdutoNaoForEncontrado() throws Exception {
+    ProdutoService produtoService = mock(ProdutoService.class);
+    when(produtoService.buscarProdutoPorId("INEXISTENTE"))
+        .thenThrow(new ProdutoNotFoundException("INEXISTENTE"));
+
+    MockMvc mockMvc = criarMockMvc(produtoService);
+
+    mockMvc
+        .perform(get("/api/produtos/INEXISTENTE").contextPath("/api"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.erro").value("PRODUTO_NAO_ENCONTRADO"))
+        .andExpect(
+            jsonPath("$.mensagem").value("Produto não encontrado para o ID informado."));
   }
 
   private MockMvc criarMockMvc(ProdutoService produtoService) {

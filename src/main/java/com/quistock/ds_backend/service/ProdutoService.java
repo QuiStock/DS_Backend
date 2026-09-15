@@ -1,6 +1,7 @@
 package com.quistock.ds_backend.service;
 
 import com.quistock.ds_backend.exception.ErpIntegrationException;
+import com.quistock.ds_backend.exception.ProdutoNotFoundException;
 import com.quistock.ds_backend.model.dto.LoteErpDTO;
 import com.quistock.ds_backend.model.dto.ProdutoDTO;
 import com.quistock.ds_backend.util.ErpValueParser;
@@ -46,11 +47,21 @@ public class ProdutoService {
   }
 
   public List<ProdutoDTO> listarProdutos(String filial, String categoria, Boolean status) {
+    return aplicarFiltros(obterProdutosConsolidados(), filial, categoria, status);
+  }
+
+  public ProdutoDTO buscarProdutoPorId(String id) {
+    return obterProdutosConsolidados().stream()
+        .filter(produto -> produto.id().equals(id))
+        .findFirst()
+        .orElseThrow(() -> new ProdutoNotFoundException(id));
+  }
+
+  private List<ProdutoDTO> obterProdutosConsolidados() {
     try {
       List<LoteErpDTO> lotes = erpRestClient.get().uri(produtosPath).retrieve().body(LOTES_TYPE);
 
-      List<ProdutoDTO> produtosConsolidados = consolidarProdutos(lotes == null ? List.of() : lotes);
-      return aplicarFiltros(produtosConsolidados, filial, categoria, status);
+      return consolidarProdutos(lotes == null ? List.of() : lotes);
     } catch (RestClientException | IllegalArgumentException exception) {
       throw new ErpIntegrationException(
           "Não foi possível conectar com a API externa do ERP.", exception);
