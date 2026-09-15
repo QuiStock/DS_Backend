@@ -9,8 +9,8 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.quistock.ds_backend.exception.ErpIntegrationException;
-import com.quistock.ds_backend.model.dto.LoteErpDTO;
-import com.quistock.ds_backend.model.dto.ProdutoDTO;
+import com.quistock.ds_backend.model.dto.ErpBatchDTO;
+import com.quistock.ds_backend.model.dto.ProductDTO;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -22,30 +22,30 @@ import org.springframework.test.web.client.ExpectedCount;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
-class ProdutoServiceTest {
+class ProductServiceTest {
 
   private static final Clock TEST_CLOCK =
       Clock.fixed(Instant.parse("2026-08-28T12:00:00Z"), ZoneOffset.UTC);
 
   private MockRestServiceServer server;
-  private ProdutoService produtoService;
+  private ProductService productService;
 
   @BeforeEach
   void setUp() {
     RestClient.Builder builder = RestClient.builder().baseUrl("http://erp.test");
     server = MockRestServiceServer.bindTo(builder).build();
     RestClient restClient = builder.build();
-    produtoService = new ProdutoService(restClient, "/produto", TEST_CLOCK);
+    productService = new ProductService(restClient, "/products", TEST_CLOCK);
   }
 
   @Test
-  void umLoteDeveGerarUmProdutoConsolidado() {
-    LoteErpDTO lote =
-        lote(
+  void shouldCreateOneConsolidatedProductFromOneBatch() {
+    ErpBatchDTO batch =
+        batch(
             "1",
             "PROD001",
             "FIL001",
-            "Loja Santana",
+            "Santana Store",
             "2026-08-20",
             "2026-09-30",
             "71",
@@ -56,34 +56,34 @@ class ProdutoServiceTest {
             "40",
             "5");
 
-    ProdutoDTO produto = produtoService.consolidarProdutos(List.of(lote)).get(0);
+    ProductDTO product = productService.consolidateProducts(List.of(batch)).get(0);
 
-    assertThat(produto.id()).isEqualTo("PROD001:FIL001");
-    assertThat(produto.sku()).isEqualTo("PROD001");
-    assertThat(produto.nome()).isEqualTo("Leite Integral 1L");
-    assertThat(produto.categoria()).isEqualTo("Laticinios");
-    assertThat(produto.estoqueAtual()).isEqualTo(71);
-    assertThat(produto.estoqueMinimo()).isEqualTo(40);
-    assertThat(produto.vendas7d()).isEqualTo(36);
-    assertThat(produto.vendas30d()).isEqualTo(150);
-    assertThat(produto.diasValidade()).isEqualTo(33);
-    assertThat(produto.leadTimeFornecedor()).isEqualTo(5);
-    assertThat(produto.preco()).isEqualByComparingTo("7.99");
-    assertThat(produto.custo()).isEqualByComparingTo("5.20");
-    assertThat(produto.ultimaReposicao()).isEqualTo(Instant.parse("2026-08-20T00:00:00Z"));
-    assertThat(produto.status()).isTrue();
-    assertThat(produto.filial()).isEqualTo("Loja Santana");
+    assertThat(product.id()).isEqualTo("PROD001:FIL001");
+    assertThat(product.sku()).isEqualTo("PROD001");
+    assertThat(product.name()).isEqualTo("Whole Milk 1L");
+    assertThat(product.category()).isEqualTo("Dairy");
+    assertThat(product.currentStock()).isEqualTo(71);
+    assertThat(product.minimumStock()).isEqualTo(40);
+    assertThat(product.sales7d()).isEqualTo(36);
+    assertThat(product.sales30d()).isEqualTo(150);
+    assertThat(product.expirationDays()).isEqualTo(33);
+    assertThat(product.supplierLeadTime()).isEqualTo(5);
+    assertThat(product.price()).isEqualByComparingTo("7.99");
+    assertThat(product.cost()).isEqualByComparingTo("5.20");
+    assertThat(product.lastRestock()).isEqualTo(Instant.parse("2026-08-20T00:00:00Z"));
+    assertThat(product.status()).isTrue();
+    assertThat(product.branch()).isEqualTo("Santana Store");
   }
 
   @Test
-  void lotesDoMesmoProdutoEFilialDevemSerSomados() {
-    List<LoteErpDTO> lotes =
+  void shouldSumBatchesForSameProductAndBranch() {
+    List<ErpBatchDTO> batches =
         List.of(
-            lote(
+            batch(
                 "1",
                 "PROD001",
                 "FIL001",
-                "Loja Santana",
+                "Santana Store",
                 "2026-08-20",
                 "2026-09-30",
                 50,
@@ -93,11 +93,11 @@ class ProdutoServiceTest {
                 100,
                 40,
                 5),
-            lote(
+            batch(
                 "2",
                 "PROD001",
                 "FIL001",
-                "Loja Santana",
+                "Santana Store",
                 "2026-08-21",
                 "2026-09-10",
                 40,
@@ -107,11 +107,11 @@ class ProdutoServiceTest {
                 100,
                 40,
                 5),
-            lote(
+            batch(
                 "3",
                 "PROD001",
                 "FIL001",
-                "Loja Santana",
+                "Santana Store",
                 "2026-08-22",
                 "2026-09-20",
                 30,
@@ -122,27 +122,27 @@ class ProdutoServiceTest {
                 40,
                 5));
 
-    ProdutoDTO produto = produtoService.consolidarProdutos(lotes).get(0);
+    ProductDTO product = productService.consolidateProducts(batches).get(0);
 
-    assertThat(produtoService.consolidarProdutos(lotes)).hasSize(1);
-    assertThat(produto.estoqueAtual()).isEqualTo(120);
-    assertThat(produto.vendas7d()).isEqualTo(50);
-    assertThat(produto.vendas30d()).isEqualTo(200);
-    assertThat(produto.estoqueMinimo()).isEqualTo(40);
-    assertThat(produto.leadTimeFornecedor()).isEqualTo(5);
-    assertThat(produto.diasValidade()).isEqualTo(13);
+    assertThat(productService.consolidateProducts(batches)).hasSize(1);
+    assertThat(product.currentStock()).isEqualTo(120);
+    assertThat(product.sales7d()).isEqualTo(50);
+    assertThat(product.sales30d()).isEqualTo(200);
+    assertThat(product.minimumStock()).isEqualTo(40);
+    assertThat(product.supplierLeadTime()).isEqualTo(5);
+    assertThat(product.expirationDays()).isEqualTo(13);
   }
 
   @Test
-  void mesmoProdutoEmFiliaisDiferentesNaoDeveSerAgrupado() {
-    List<ProdutoDTO> produtos =
-        produtoService.consolidarProdutos(
+  void shouldKeepDifferentBranchesSeparate() {
+    List<ProductDTO> products =
+        productService.consolidateProducts(
             List.of(
-                lote(
+                batch(
                     "1",
                     "PROD001",
                     "FIL001",
-                    "Loja Santana",
+                    "Santana Store",
                     "2026-08-20",
                     "2026-09-30",
                     50,
@@ -152,11 +152,11 @@ class ProdutoServiceTest {
                     20,
                     40,
                     5),
-                lote(
+                batch(
                     "2",
                     "PROD001",
                     "FIL002",
-                    "Loja Centro",
+                    "Downtown Store",
                     "2026-08-20",
                     "2026-09-30",
                     70,
@@ -167,24 +167,24 @@ class ProdutoServiceTest {
                     40,
                     5)));
 
-    assertThat(produtos).hasSize(2);
-    assertThat(produtos)
-        .extracting(ProdutoDTO::id)
+    assertThat(products).hasSize(2);
+    assertThat(products)
+        .extracting(ProductDTO::id)
         .containsExactly("PROD001:FIL001", "PROD001:FIL002");
-    assertThat(produtos).extracting(ProdutoDTO::estoqueAtual).containsExactly(50, 70);
+    assertThat(products).extracting(ProductDTO::currentStock).containsExactly(50, 70);
   }
 
   @Test
-  void loteSemEstoqueNaoDeveDefinirValidadePrincipal() {
-    ProdutoDTO produto =
-        produtoService
-            .consolidarProdutos(
+  void shouldIgnoreBatchesWithoutStockWhenCalculatingExpiration() {
+    ProductDTO product =
+        productService
+            .consolidateProducts(
                 List.of(
-                    lote(
+                    batch(
                         "1",
                         "PROD001",
                         "FIL001",
-                        "Loja Santana",
+                        "Santana Store",
                         "2026-08-20",
                         "2026-08-20",
                         0,
@@ -194,11 +194,11 @@ class ProdutoServiceTest {
                         0,
                         40,
                         5),
-                    lote(
+                    batch(
                         "2",
                         "PROD001",
                         "FIL001",
-                        "Loja Santana",
+                        "Santana Store",
                         "2026-08-21",
                         "2026-09-20",
                         10,
@@ -210,20 +210,20 @@ class ProdutoServiceTest {
                         5)))
             .get(0);
 
-    assertThat(produto.diasValidade()).isEqualTo(23);
+    assertThat(product.expirationDays()).isEqualTo(23);
   }
 
   @Test
-  void precoECustoDevemVirDoLoteMaisRecente() {
-    ProdutoDTO produto =
-        produtoService
-            .consolidarProdutos(
+  void shouldUsePriceAndCostFromMostRecentBatch() {
+    ProductDTO product =
+        productService
+            .consolidateProducts(
                 List.of(
-                    lote(
+                    batch(
                         "1",
                         "PROD001",
                         "FIL001",
-                        "Loja Santana",
+                        "Santana Store",
                         "2026-08-20",
                         "2026-09-30",
                         50,
@@ -233,11 +233,11 @@ class ProdutoServiceTest {
                         20,
                         40,
                         5),
-                    lote(
+                    batch(
                         "2",
                         "PROD001",
                         "FIL001",
-                        "Loja Santana",
+                        "Santana Store",
                         "2026-08-25",
                         "2026-10-30",
                         40,
@@ -249,20 +249,20 @@ class ProdutoServiceTest {
                         5)))
             .get(0);
 
-    assertThat(produto.preco()).isEqualByComparingTo("8.49");
-    assertThat(produto.custo()).isEqualByComparingTo("5.80");
-    assertThat(produto.ultimaReposicao()).isEqualTo(Instant.parse("2026-08-25T00:00:00Z"));
+    assertThat(product.price()).isEqualByComparingTo("8.49");
+    assertThat(product.cost()).isEqualByComparingTo("5.80");
+    assertThat(product.lastRestock()).isEqualTo(Instant.parse("2026-08-25T00:00:00Z"));
   }
 
   @Test
-  void dataUnixDeveSerConvertidaParaDataDeValidade() {
+  void shouldConvertUnixTimestampToExpirationDate() {
     long timestamp = Instant.parse("2026-09-15T00:00:00Z").getEpochSecond();
-    LoteErpDTO lote =
-        lote(
+    ErpBatchDTO batch =
+        batch(
             "1",
             "PROD001",
             "FIL001",
-            "Loja Santana",
+            "Santana Store",
             "2026-08-20",
             timestamp,
             10,
@@ -273,21 +273,21 @@ class ProdutoServiceTest {
             40,
             5);
 
-    ProdutoDTO produto = produtoService.consolidarProdutos(List.of(lote)).get(0);
+    ProductDTO product = productService.consolidateProducts(List.of(batch)).get(0);
 
-    assertThat(produto.diasValidade()).isEqualTo(18);
+    assertThat(product.expirationDays()).isEqualTo(18);
   }
 
   @Test
-  void filtrosDevemSerAplicadosDepoisDaConsolidacao() {
-    configurarRespostaDoErp(
+  void shouldApplyFiltersAfterConsolidation() {
+    configureErpResponse(
         """
         [
           {
             "id": "1",
             "codigo_produto_erp": "PROD001",
-            "nome_produto": "Leite Integral 1L",
-            "categoria": "Laticinios",
+            "nome_produto": "Whole Milk 1L",
+            "categoria": "Dairy",
             "unidade_medida": "UN",
             "num_lote": "LT001",
             "data_validade": "2026-09-30",
@@ -295,7 +295,7 @@ class ProdutoServiceTest {
             "preco": "7.99",
             "custo": "5.20",
             "codigo_filial_erp": "FIL001",
-            "filial": "Loja Santana",
+            "filial": "Santana Store",
             "certificado_qualidade": true,
             "data_entrada": "2026-08-20",
             "vendas_7d": "10",
@@ -306,8 +306,8 @@ class ProdutoServiceTest {
           {
             "id": "2",
             "codigo_produto_erp": "PROD001",
-            "nome_produto": "Leite Integral 1L",
-            "categoria": "Laticinios",
+            "nome_produto": "Whole Milk 1L",
+            "categoria": "Dairy",
             "unidade_medida": "UN",
             "num_lote": "LT002",
             "data_validade": "2026-10-30",
@@ -315,7 +315,7 @@ class ProdutoServiceTest {
             "preco": "8.19",
             "custo": "5.40",
             "codigo_filial_erp": "FIL001",
-            "filial": "Loja Santana",
+            "filial": "Santana Store",
             "certificado_qualidade": true,
             "data_entrada": "2026-08-21",
             "vendas_7d": "5",
@@ -326,8 +326,8 @@ class ProdutoServiceTest {
           {
             "id": "3",
             "codigo_produto_erp": "PROD002",
-            "nome_produto": "Refrigerante",
-            "categoria": "Bebidas",
+            "nome_produto": "Soda",
+            "categoria": "Beverages",
             "unidade_medida": "UN",
             "num_lote": "LT003",
             "data_validade": "2026-10-30",
@@ -335,7 +335,7 @@ class ProdutoServiceTest {
             "preco": "5.99",
             "custo": "3.20",
             "codigo_filial_erp": "FIL002",
-            "filial": "Loja Centro",
+            "filial": "Downtown Store",
             "certificado_qualidade": true,
             "data_entrada": "2026-08-22",
             "vendas_7d": "0",
@@ -346,28 +346,28 @@ class ProdutoServiceTest {
         ]
         """);
 
-    assertThat(produtoService.listarProdutos("Loja Santana", null, null))
-        .extracting(ProdutoDTO::id)
+    assertThat(productService.listProducts("Santana Store", null, null))
+        .extracting(ProductDTO::id)
         .containsExactly("PROD001:FIL001");
-    assertThat(produtoService.listarProdutos(null, "Bebidas", null))
-        .extracting(ProdutoDTO::id)
+    assertThat(productService.listProducts(null, "Beverages", null))
+        .extracting(ProductDTO::id)
         .containsExactly("PROD002:FIL002");
-    assertThat(produtoService.listarProdutos(null, null, false))
-        .extracting(ProdutoDTO::id)
+    assertThat(productService.listProducts(null, null, false))
+        .extracting(ProductDTO::id)
         .containsExactly("PROD002:FIL002");
   }
 
   @Test
-  void configuracoesDivergentesDevemUsarMaiorValorDeFormaDeterministica() {
-    ProdutoDTO produto =
-        produtoService
-            .consolidarProdutos(
+  void shouldResolveDivergentConfigurationWithHighestValue() {
+    ProductDTO product =
+        productService
+            .consolidateProducts(
                 List.of(
-                    lote(
+                    batch(
                         "1",
                         "PROD001",
                         "FIL001",
-                        "Loja Santana",
+                        "Santana Store",
                         "2026-08-20",
                         "2026-09-30",
                         50,
@@ -377,11 +377,11 @@ class ProdutoServiceTest {
                         20,
                         40,
                         5),
-                    lote(
+                    batch(
                         "2",
                         "PROD001",
                         "FIL001",
-                        "Loja Santana",
+                        "Santana Store",
                         "2026-08-21",
                         "2026-09-30",
                         40,
@@ -393,59 +393,59 @@ class ProdutoServiceTest {
                         7)))
             .get(0);
 
-    assertThat(produto.estoqueMinimo()).isEqualTo(50);
-    assertThat(produto.leadTimeFornecedor()).isEqualTo(7);
+    assertThat(product.minimumStock()).isEqualTo(50);
+    assertThat(product.supplierLeadTime()).isEqualTo(7);
   }
 
   @Test
-  void falhaNoErpDeveSerConvertidaEmExcecaoDeIntegracao() {
+  void shouldConvertErpFailureToIntegrationException() {
     server
-        .expect(requestTo("http://erp.test/produto"))
+        .expect(requestTo("http://erp.test/products"))
         .andExpect(method(GET))
         .andRespond(withServerError());
 
-    assertThatThrownBy(() -> produtoService.listarProdutos(null, null, null))
+    assertThatThrownBy(() -> productService.listProducts(null, null, null))
         .isInstanceOf(ErpIntegrationException.class)
-        .hasMessage("Não foi possível conectar com a API externa do ERP.");
+        .hasMessage("Could not connect to the external ERP API.");
   }
 
-  private void configurarRespostaDoErp(String resposta) {
+  private void configureErpResponse(String response) {
     server
-        .expect(ExpectedCount.times(3), requestTo("http://erp.test/produto"))
+        .expect(ExpectedCount.times(3), requestTo("http://erp.test/products"))
         .andExpect(method(GET))
-        .andRespond(withSuccess(resposta, MediaType.APPLICATION_JSON));
+        .andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
   }
 
-  private LoteErpDTO lote(
-      String id, String codigoProduto, String codigoFilial, String filial, Object... valores) {
-    Object dataEntrada = valores[0];
-    Object dataValidade = valores[1];
-    Object quantidade = valores[2];
-    Object preco = valores[3];
-    Object custo = valores[4];
-    Object vendas7d = valores[5];
-    Object vendas30d = valores[6];
-    Object estoqueMinimo = valores[7];
-    Object leadTime = valores[8];
+  private ErpBatchDTO batch(
+      String id, String erpProductCode, String erpBranchCode, String branch, Object... values) {
+    Object entryDate = values[0];
+    Object expirationDate = values[1];
+    Object quantity = values[2];
+    Object price = values[3];
+    Object cost = values[4];
+    Object sales7d = values[5];
+    Object sales30d = values[6];
+    Object minimumStock = values[7];
+    Object leadTime = values[8];
 
-    return new LoteErpDTO(
+    return new ErpBatchDTO(
         id,
-        codigoProduto,
-        "Leite Integral 1L",
-        "Laticinios",
+        erpProductCode,
+        "Whole Milk 1L",
+        "Dairy",
         "UN",
         "LT" + id,
-        dataValidade,
-        quantidade,
-        preco,
-        custo,
-        codigoFilial,
-        filial,
+        expirationDate,
+        quantity,
+        price,
+        cost,
+        erpBranchCode,
+        branch,
         true,
-        dataEntrada,
-        vendas7d,
-        vendas30d,
-        estoqueMinimo,
+        entryDate,
+        sales7d,
+        sales30d,
+        minimumStock,
         leadTime);
   }
 }

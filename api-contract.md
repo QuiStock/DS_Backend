@@ -1,504 +1,525 @@
-# Contrato de API — QuiStock
+# QuiStock API Contract
 
-Versão: 1.1.0  
-Última atualização: 28/08/2026
+Version: 1.1.0
+Last updated: 2026-08-28
 
 ## Base URL
 
 Local:
 
-http://localhost:8080/api
-
----
-## Origem dos dados
-
-Os dados retornados por este endpoint têm origem em uma API externa de ERP.
-
-No MVP, a origem é uma MockAPI contendo dados falsos, porém estruturados como se fossem dados reais de um ERP.
-
-O endpoint externo utilizado pelo backend é `GET /produto`. Apesar do nome do endpoint
-estar no singular, cada registro retornado representa um lote de um produto, e não um
-produto consolidado.
-
-O backend do QuiStock é responsável por consumir essa API externa, tratar os campos,
-agrupar os lotes por produto e filial e retornar um modelo padronizado de produtos para
-o frontend. O frontend não precisa conhecer o modelo de lotes do ERP.
+`http://localhost:8080/api`
 
 ---
 
-# 1. Produtos
+## Data source
 
-## 1.1 Listar produtos
+The data returned by the API originates from an external ERP API.
 
-Retorna os produtos consolidados pelo backend a partir dos lotes vindos da MockAPI.
+For the MVP, the ERP is represented by a MockAPI containing fake data with the same
+structure as a real ERP integration.
 
-Método:
+The external endpoint consumed by the backend is `GET /products`. Each returned record
+represents an ERP batch, not a consolidated product. The backend normalizes the records,
+groups batches by product and branch, and exposes a stable product model to the frontend.
 
-GET /produtos
+The external MockAPI currently uses Portuguese field names. Those names are kept only at
+the integration boundary; all public API fields and internal code identifiers are English.
 
-Resposta 200:
+---
 
+# 1. Products
+
+## 1.1 List products
+
+Returns products consolidated by the backend from the batches provided by the MockAPI.
+
+Method:
+
+`GET /products`
+
+Response 200:
+
+```json
 [
   {
     "id": "PROD001:FIL001",
     "sku": "PROD001",
-    "nome": "Leite Integral 1L",
-    "categoria": "Laticinios",
-    "estoque_atual": 121,
-    "estoque_minimo": 40,
-    "vendas_7d": 50,
-    "vendas_30d": 200,
-    "dias_validade": 12,
-    "lead_time_fornecedor": 5,
-    "preco": 7.99,
-    "custo": 5.20,
-    "ultima_reposicao": "2026-08-20T00:00:00Z",
+    "name": "Whole Milk 1L",
+    "category": "Dairy",
+    "current_stock": 121,
+    "minimum_stock": 40,
+    "sales_7d": 50,
+    "sales_30d": 200,
+    "expiration_days": 12,
+    "supplier_lead_time": 5,
+    "price": 7.99,
+    "cost": 5.20,
+    "last_restock": "2026-08-20T00:00:00Z",
     "status": true,
-    "filial": "Loja Santana"
+    "branch": "Santana Store"
   }
 ]
-
-### Consolidação dos lotes
-
-Cada registro recebido de `GET /produto` representa um lote. O backend consolida os
-registros antes de montar a resposta pública.
-
-A chave de agrupamento é composta por:
-
-```text
-codigo_produto_erp + codigo_filial_erp
 ```
 
-O mesmo produto em filiais diferentes resulta em produtos consolidados diferentes.
-O agrupamento não é feito somente pelo nome ou somente pelo código do produto.
+### Batch consolidation
 
-Regras de transformação:
+Each record received from the ERP `GET /products` endpoint represents one batch. The
+backend consolidates all records before creating the public response.
 
-- `sku`: recebe `codigo_produto_erp`.
-- `nome`: recebe `nome_produto`.
-- `categoria`: recebe `categoria`.
-- `filial`: recebe `filial`.
-- `estoque_atual`: soma `quantidade` de todos os lotes do grupo.
-- `vendas_7d`: soma `vendas_7d` de todos os lotes do grupo.
-- `vendas_30d`: soma `vendas_30d` de todos os lotes do grupo.
-- `dias_validade`: calcula os dias até a data de validade mais próxima entre os lotes com quantidade maior que zero.
-- `estoque_minimo`: não é somado. Quando os lotes apresentam valores diferentes, é usado o maior valor válido e a inconsistência é registrada no log.
-- `lead_time_fornecedor`: recebe `lead_time_dias` e não é somado. Quando há valores diferentes, é usado o maior valor válido e a inconsistência é registrada no log.
-- `preco`: vem do lote mais recente segundo `data_entrada`.
-- `custo`: vem do lote mais recente segundo `data_entrada`.
-- `status`: é `true` quando o estoque consolidado é maior que zero.
-- `id`: nesta etapa sem persistência, é gerado de forma determinística como `codigo_produto_erp:codigo_filial_erp`.
+The grouping key is:
 
-Campos internos do lote, como `num_lote`, `certificado_qualidade`, `data_entrada`,
-`data_validade` e `unidade_medida`, não são expostos nessa rota pública.
+```text
+erp_product_code + erp_branch_code
+```
 
-Datas podem ser recebidas como data ISO-8601, timestamp Unix em segundos ou timestamp
-Unix em milissegundos. Valores numéricos podem ser recebidos como números JSON ou como
-strings numéricas. O backend normaliza esses formatos antes da consolidação.
+The same product in different branches produces different consolidated products. Grouping
+is never based only on the product name or product code.
 
-Um lote vencido pode resultar em `dias_validade` igual a zero ou negativo. A implementação
-utiliza o número real de dias entre a data atual e o vencimento, portanto datas passadas
-resultam em valores negativos. Quando não existe lote disponível com data de validade,
-o campo é retornado como `null`.
+Transformation rules:
 
-### Filtros opcionais
+- `sku` receives the ERP `codigo_produto_erp` value.
+- `name` receives `nome_produto`.
+- `category` receives `categoria`.
+- `branch` receives `filial`.
+- `current_stock` is the sum of `quantidade` for all batches in the group.
+- `sales_7d` is the sum of `vendas_7d` for all batches in the group.
+- `sales_30d` is the sum of `vendas_30d` for all batches in the group.
+- `expiration_days` is calculated using the nearest expiration date among batches with
+  quantity greater than zero.
+- `minimum_stock` is not summed. If batches disagree, the highest valid value is used and
+  the inconsistency is logged.
+- `supplier_lead_time` receives `lead_time_dias` and is not summed. If batches disagree,
+  the highest valid value is used and the inconsistency is logged.
+- `price` and `cost` come from the most recent batch according to `data_entrada`.
+- `status` is `true` when consolidated stock is greater than zero.
+- `id` is deterministic in this non-persistent stage:
+  `codigo_produto_erp:codigo_filial_erp`.
 
-A rota de listagem de produtos pode receber filtros via query params. Os filtros são
-aplicados somente depois da consolidação dos lotes.
+Internal batch fields such as `num_lote`, `certificado_qualidade`, `data_entrada`,
+`data_validade`, and `unidade_medida` are not exposed by this public route.
 
-Exemplos:
+Dates may be received as ISO-8601 dates, Unix timestamps in seconds, or Unix timestamps in
+milliseconds. Numeric values may be JSON numbers or numeric strings. The backend
+normalizes these formats before consolidation.
 
-GET /produtos?filial=Loja Centro  
-GET /produtos?categoria=Laticinios  
-GET /produtos?status=true  
+An expired batch may produce a negative `expiration_days` value. The implementation uses
+the actual number of days between the current date and the expiration date. If no available
+batch has an expiration date, the field is `null`.
 
-Parâmetros possíveis:
+### Optional filters
 
-- filial: filtra produtos por loja/filial
-- categoria: filtra produtos por categoria
-- status: filtra produtos ativos ou inativos
+Filters are applied after batch consolidation:
 
+```text
+GET /products?branch=Downtown%20Store
+GET /products?category=Dairy
+GET /products?status=true
+```
+
+Available parameters:
+
+- `branch`: filters products by branch.
+- `category`: filters products by category.
+- `status`: filters active or inactive products.
 
 ---
 
-## 1.2 Buscar produto por ID
+## 1.2 Get a product by ID
 
-Método:
+Method:
 
-GET /produtos/{id}
+`GET /products/{id}`
 
-Exemplo:
+Example:
 
-GET /produtos/1
+`GET /products/PROD001:FIL001`
 
-Resposta 200:
+Response 200:
 
+```json
 {
-  "id": "1",
-  "sku": "LAT001",
-  "nome": "Leite Integral 1L",
-  "categoria": "Laticínios",
-  "estoque_atual": 51,
-  "estoque_minimo": 58,
-  "vendas_7d": 36,
-  "vendas_30d": 150,
-  "dias_validade": 0,
-  "lead_time_fornecedor": 3,
-  "preco": 7.90,
-  "custo": 4.50,
+  "id": "PROD001:FIL001",
+  "sku": "PROD001",
+  "name": "Whole Milk 1L",
+  "category": "Dairy",
+  "current_stock": 51,
+  "minimum_stock": 58,
+  "sales_7d": 36,
+  "sales_30d": 150,
+  "expiration_days": 0,
+  "supplier_lead_time": 3,
+  "price": 7.90,
+  "cost": 4.50,
   "status": true,
-  "filial": "Loja Centro"
+  "branch": "Downtown Store"
 }
+```
 
 ---
 
-# 2. Fluxos
+# 2. Flows
 
-O fluxo é a classificação do produto após a análise.
+A flow is the product classification produced by an analysis.
 
-Tipos possíveis:
+Possible types:
 
-- ALTO: vai ter ruptura
-- MEDIO: está adequado
-- BAIXO: vai sobrar ou vencer
+- `HIGH`: the product is at risk of stockout.
+- `MEDIUM`: the stock level is adequate.
+- `LOW`: the product may remain in excess or expire.
 
-## Observação sobre a classificação
+## Classification
 
-No MVP, a classificação ALTO, MEDIO e BAIXO será feita por um classificador simples dentro do backend.
+In the MVP, a simple backend classifier determines `HIGH`, `MEDIUM`, or `LOW` using:
 
-O classificador utilizará campos como:
+- `current_stock`
+- `sales_7d`
+- `sales_30d`
+- `expiration_days`
+- `supplier_lead_time`
 
-- estoque_atual
-- vendas_7d
-- vendas_30d
-- dias_validade
-- lead_time_fornecedor
-
-A arquitetura permite substituir essa lógica futuramente por um modelo de Machine Learning treinado.
+The architecture allows this logic to be replaced by a trained machine-learning model in
+the future.
 
 ---
 
-## 2.1 Analisar um produto
+## 2.1 Analyze a product
 
-Método:
+Method:
 
-POST /fluxos/analisar
+`POST /flows/analyze`
 
 Body:
 
+```json
 {
-  "produto_id": "1"
+  "product_id": "PROD001:FIL001"
 }
+```
 
-Resposta 201:
+Response 201:
 
+```json
 {
   "id": "101",
-  "produto_id": "1",
-  "produto_nome": "Leite Integral 1L",
-  "tipo_fluxo": "BAIXO",
-  "status": "ANALISADO",
-  "motivo": "Produto vencido ou próximo do vencimento.",
-  "media_vendas_diaria": 5.14,
-  "cobertura_estoque_dias": 9.92,
-  "dias_validade": 0,
-  "lead_time_fornecedor": 3,
-  "data_analise": "2026-07-30T11:47:00-03:00"
+  "product_id": "PROD001:FIL001",
+  "product_name": "Whole Milk 1L",
+  "flow_type": "LOW",
+  "status": "ANALYZED",
+  "reason": "Product is expired or close to expiration.",
+  "daily_sales_average": 5.14,
+  "stock_coverage_days": 9.92,
+  "expiration_days": 0,
+  "supplier_lead_time": 3,
+  "analysis_date": "2026-07-30T11:47:00-03:00"
 }
+```
 
 ---
 
-## 2.2 Listar fluxos analisados
+## 2.2 List analyzed flows
 
-Método:
+Method:
 
-GET /fluxos
+`GET /flows`
 
-Resposta 200:
+Response 200:
 
+```json
 [
   {
     "id": "101",
-    "produto_id": "1",
-    "produto_nome": "Leite Integral 1L",
-    "tipo_fluxo": "BAIXO",
-    "status": "ANALISADO",
-    "motivo": "Produto vencido ou próximo do vencimento."
+    "product_id": "PROD001:FIL001",
+    "product_name": "Whole Milk 1L",
+    "flow_type": "LOW",
+    "status": "ANALYZED",
+    "reason": "Product is expired or close to expiration."
   }
 ]
+```
 
-### Filtros opcionais
+### Optional filters
 
-A rota de listagem de fluxos poderá receber filtros via query params.
+```text
+GET /flows?flow_type=LOW
+GET /flows?product_id=PROD001:FIL001
+GET /flows?status=ANALYZED
+```
 
-Exemplos:
+Available parameters:
 
-GET /fluxos?tipo_fluxo=BAIXO  
-GET /fluxos?produto_id=1  
-GET /fluxos?status=ANALISADO  
-
-Parâmetros possíveis:
-
-- tipo_fluxo: ALTO, MEDIO ou BAIXO
-- produto_id: filtra fluxos de um produto específico
-- status: filtra pelo status da análise
-
----
-
-# 3. Ações
-
-A ação é o que o sistema recomenda fazer com base no fluxo.
-
-Tipos possíveis:
-
-- PROMOCAO
-- PEDIDO_ESTOQUE
-- MONITORAR
-
-Status possíveis:
-
-- SUGERIDA
-- APROVADA
-- RECUSADA
-- CONCLUIDA
-
-## Regras de geração de ações
-
-- Fluxo ALTO: gera PEDIDO_ESTOQUE
-- Fluxo MEDIO: gera MONITORAR
-- Fluxo BAIXO: gera PROMOCAO
-
+- `flow_type`: `HIGH`, `MEDIUM`, or `LOW`.
+- `product_id`: filters flows for one product.
+- `status`: filters by analysis status.
 
 ---
 
-## 3.1 Gerar ações para um fluxo
+# 3. Actions
 
-Método:
+An action is the recommendation generated from a flow.
 
-POST /acoes/gerar
+Possible types:
+
+- `PROMOTION`
+- `STOCK_ORDER`
+- `MONITOR`
+
+Possible statuses:
+
+- `SUGGESTED`
+- `APPROVED`
+- `REJECTED`
+- `COMPLETED`
+
+Generation rules:
+
+- `HIGH` flow generates `STOCK_ORDER`.
+- `MEDIUM` flow generates `MONITOR`.
+- `LOW` flow generates `PROMOTION`.
+
+---
+
+## 3.1 Generate actions for a flow
+
+Method:
+
+`POST /actions/generate`
 
 Body:
 
+```json
 {
-  "fluxo_id": "101"
+  "flow_id": "101"
 }
+```
 
-Resposta 201:
+Response 201:
 
+```json
 {
-  "fluxo_id": "101",
-  "acoes_geradas": [
+  "flow_id": "101",
+  "generated_actions": [
     {
       "id": "501",
-      "tipo_acao": "PROMOCAO",
-      "status": "SUGERIDA",
-      "justificativa": "Produto com risco de vencimento ou sobra em estoque."
+      "action_type": "PROMOTION",
+      "status": "SUGGESTED",
+      "justification": "Product has expiration or excess stock risk."
     }
   ]
 }
-
+```
 
 ---
 
-## 3.2 Listar ações
+## 3.2 List actions
 
-Método:
+Method:
 
-GET /acoes
+`GET /actions`
 
-Resposta 200:
+Response 200:
 
+```json
 [
   {
     "id": "501",
-    "fluxo_id": "101",
-    "produto_nome": "Leite Integral 1L",
-    "tipo_acao": "PROMOCAO",
-    "status": "SUGERIDA",
-    "justificativa": "Produto com risco de vencimento."
+    "flow_id": "101",
+    "product_name": "Whole Milk 1L",
+    "action_type": "PROMOTION",
+    "status": "SUGGESTED",
+    "justification": "Product has expiration risk."
   }
 ]
-### Filtros opcionais
+```
 
-A rota de listagem de ações poderá receber filtros via query params.
+### Optional filters
 
-Exemplos:
+```text
+GET /actions?status=SUGGESTED
+GET /actions?action_type=PROMOTION
+GET /actions?flow_id=101
+```
 
-GET /acoes?status=SUGERIDA  
-GET /acoes?tipo_acao=PROMOCAO  
-GET /acoes?fluxo_id=101  
+Available parameters:
 
-Parâmetros possíveis:
+- `status`: `SUGGESTED`, `APPROVED`, `REJECTED`, or `COMPLETED`.
+- `action_type`: `PROMOTION`, `STOCK_ORDER`, or `MONITOR`.
+- `flow_id`: filters actions generated from one flow.
 
-- status: SUGERIDA, APROVADA, RECUSADA ou CONCLUIDA
-- tipo_acao: PROMOCAO, PEDIDO_ESTOQUE ou MONITORAR
-- fluxo_id: filtra ações geradas a partir de um fluxo específico
 ---
 
-## 3.3 Atualizar status de uma ação
+## 3.3 Update an action status
 
-Método:
+Method:
 
-PATCH /acoes/{id}/status
+`PATCH /actions/{id}/status`
 
-Exemplo:
+Example:
 
-PATCH /acoes/501/status
+`PATCH /actions/501/status`
 
 Body:
 
+```json
 {
-  "status": "APROVADA"
+  "status": "APPROVED"
 }
+```
 
-Resposta 200:
+Response 200:
 
+```json
 {
   "id": "501",
-  "status": "APROVADA"
+  "status": "APPROVED"
 }
+```
 
 ---
 
 # 4. Chatbot
 
-## 4.1 Enviar mensagem para o chatbot
+## 4.1 Send a chatbot message
 
-Método:
+Method:
 
-POST /chat
+`POST /chat`
 
 Body:
 
+```json
 {
-  "usuario_id": "1",
-  "mensagem": "Quais produtos precisam de promoção?"
+  "user_id": "1",
+  "message": "Which products need a promotion?"
 }
+```
 
-Resposta 200:
+Response 200:
 
+```json
 {
-  "resposta": "Hoje existem produtos com risco de vencimento. A principal sugestão é criar promoção para Leite Integral 1L.",
-  "agente_responsavel": "agente_operacional",
-  "dados_referenciados": [
+  "answer": "There are products at risk of expiration. The main suggestion is to create a promotion for Whole Milk 1L.",
+  "responsible_agent": "operations_agent",
+  "referenced_data": [
     {
-      "produto_id": "1",
-      "nome": "Leite Integral 1L",
-      "tipo_fluxo": "BAIXO",
-      "acao_sugerida": "PROMOCAO"
+      "product_id": "PROD001:FIL001",
+      "name": "Whole Milk 1L",
+      "flow_type": "LOW",
+      "suggested_action": "PROMOTION"
     }
   ]
 }
+```
 
 ---
 
-# 5. Filiais
+# 5. Branches
 
-## 5.1 Listar filiais
+## 5.1 List branches
 
-Método:
+Method:
 
-GET /filiais
+`GET /branches`
 
-Resposta 200:
+Response 200:
 
+```json
 [
   {
     "id": "1",
-    "nome": "Loja Centro",
-    "endereco": "Av. Paulista, 1000",
-    "cidade": "São Paulo",
-    "estado": "SP",
+    "name": "Downtown Store",
+    "address": "1000 Paulista Avenue",
+    "city": "Sao Paulo",
+    "state": "SP",
     "latitude": -23.561684,
     "longitude": -46.655981
   }
 ]
+```
 
 ---
 
 # 6. Dashboard
 
-Observação:
-Os números retornados pelo dashboard são calculados a partir dos produtos analisados, fluxos gerados e ações sugeridas pelo sistema.
+Dashboard metrics are calculated from analyzed products, generated flows, and suggested
+actions.
 
-## 6.1 Buscar resumo do dashboard
+## 6.1 Get the dashboard summary
 
-Método:
+Method:
 
-GET /dashboard/resumo
+`GET /dashboard/summary`
 
-Resposta 200:
+Response 200:
 
+```json
 {
-  "total_produtos": 5,
-  "produtos_alto": 1,
-  "produtos_medio": 2,
-  "produtos_baixo": 2,
-  "acoes_sugeridas": 3,
-  "promocoes_sugeridas": 2,
-  "pedidos_estoque_sugeridos": 1
+  "total_products": 5,
+  "high_risk_products": 1,
+  "medium_risk_products": 2,
+  "low_risk_products": 2,
+  "suggested_actions": 3,
+  "suggested_promotions": 2,
+  "suggested_stock_orders": 1
 }
+```
 
 ---
 
-# 7. Integração ERP
+# 7. ERP integration
 
-## 7.1 Testar conexão com ERP
+## 7.1 Test the ERP connection
 
-Método:
+Method:
 
-GET /integracao-erp/status
+`GET /erp-integration/status`
 
-Resposta 200:
+Response 200:
 
+```json
 {
-  "origem": "MockAPI",
-  "status": "CONECTADO",
-  "ultima_sincronizacao": "2026-07-30T11:47:00-03:00"
+  "source": "MockAPI",
+  "status": "CONNECTED",
+  "last_synchronization": "2026-07-30T11:47:00-03:00"
 }
-
----
-# 8. Padrão de erros
-
-## Produto não encontrado
-
-Status:
-
-404 Not Found
-
-Resposta:
-
-{
-  "erro": "PRODUTO_NAO_ENCONTRADO",
-  "mensagem": "Produto não encontrado para o ID informado."
-}
+```
 
 ---
 
-## Erro na integração com ERP
+# 8. Error format
 
-Status:
+## Product not found
 
-503 Service Unavailable
+Status: `404 Not Found`
 
-Resposta:
-
+```json
 {
-  "erro": "ERP_INDISPONIVEL",
-  "mensagem": "Não foi possível conectar com a API externa do ERP."
+  "error": "PRODUCT_NOT_FOUND",
+  "message": "Product was not found for the provided ID."
 }
+```
 
 ---
 
-## Requisição inválida
+## ERP integration failure
 
-Status:
+Status: `503 Service Unavailable`
 
-400 Bad Request
-
-Resposta:
-
+```json
 {
-  "erro": "REQUISICAO_INVALIDA",
-  "mensagem": "Campos obrigatórios ausentes ou inválidos."
+  "error": "ERP_UNAVAILABLE",
+  "message": "Could not connect to the external ERP API."
 }
+```
+
+---
+
+## Invalid request
+
+Status: `400 Bad Request`
+
+```json
+{
+  "error": "INVALID_REQUEST",
+  "message": "Required fields are missing or invalid."
+}
+```
