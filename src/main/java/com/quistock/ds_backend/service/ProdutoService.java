@@ -47,25 +47,22 @@ public class ProdutoService {
   }
 
   public List<ProdutoDTO> listarProdutos(String filial, String categoria, Boolean status) {
-    return aplicarFiltros(obterProdutosConsolidados(), filial, categoria, status);
-  }
-
-  public ProdutoDTO buscarProdutoPorId(String id) {
-    return obterProdutosConsolidados().stream()
-        .filter(produto -> produto.id().equals(id))
-        .findFirst()
-        .orElseThrow(() -> new ProdutoNotFoundException(id));
-  }
-
-  private List<ProdutoDTO> obterProdutosConsolidados() {
     try {
       List<LoteErpDTO> lotes = erpRestClient.get().uri(produtosPath).retrieve().body(LOTES_TYPE);
 
-      return consolidarProdutos(lotes == null ? List.of() : lotes);
+      List<ProdutoDTO> produtosConsolidados = consolidarProdutos(lotes == null ? List.of() : lotes);
+      return aplicarFiltros(produtosConsolidados, filial, categoria, status);
     } catch (RestClientException | IllegalArgumentException exception) {
       throw new ErpIntegrationException(
           "Não foi possível conectar com a API externa do ERP.", exception);
     }
+  }
+
+  public ProdutoDTO buscarProdutoPorId(String id) {
+    return listarProdutos(null, null, null).stream()
+        .filter(produto -> produto.id().equals(id))
+        .findFirst()
+        .orElseThrow(() -> new ProdutoNotFoundException(id));
   }
 
   List<ProdutoDTO> consolidarProdutos(List<LoteErpDTO> lotes) {
@@ -97,7 +94,7 @@ public class ProdutoService {
     int vendas30d = somar(lotesDoProduto, LoteErpDTO::vendas30d);
 
     return new ProdutoDTO(
-        criarIdPublico(chave),
+        chave.idPublico(),
         chave.codigoProdutoErp(),
         primeiroLote.nomeProduto(),
         primeiroLote.categoria(),
@@ -116,13 +113,6 @@ public class ProdutoService {
 
   private ChaveProdutoFilial criarChave(LoteErpDTO lote) {
     return new ChaveProdutoFilial(lote.codigoProdutoErp(), lote.codigoFilialErp());
-  }
-
-  private String criarIdPublico(ChaveProdutoFilial chave) {
-    return "%s:%s"
-        .formatted(
-            Objects.toString(chave.codigoProdutoErp(), ""),
-            Objects.toString(chave.codigoFilialErp(), ""));
   }
 
   private int somar(List<LoteErpDTO> lotes, Function<LoteErpDTO, Object> campo) {
@@ -179,5 +169,10 @@ public class ProdutoService {
     return lotes.stream().max(comparator).orElseThrow();
   }
 
-  private record ChaveProdutoFilial(String codigoProdutoErp, String codigoFilialErp) {}
+  private record ChaveProdutoFilial(String codigoProdutoErp, String codigoFilialErp) {
+    private String idPublico() {
+      return "%s:%s"
+          .formatted(Objects.toString(codigoProdutoErp, ""), Objects.toString(codigoFilialErp, ""));
+    }
+  }
 }

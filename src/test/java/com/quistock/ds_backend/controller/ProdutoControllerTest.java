@@ -83,8 +83,7 @@ class ProdutoControllerTest {
         .perform(get("/api/produtos/INEXISTENTE").contextPath("/api"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.erro").value("PRODUTO_NAO_ENCONTRADO"))
-        .andExpect(
-            jsonPath("$.mensagem").value("Produto não encontrado para o ID informado."));
+        .andExpect(jsonPath("$.mensagem").value("Produto não encontrado para o ID informado."));
   }
 
   private MockMvc criarMockMvc(ProdutoService produtoService) {
