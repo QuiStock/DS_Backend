@@ -1,51 +1,36 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
       - main
-      - qa
-  workflow_dispatch:
 
 env:
   JAVA_VERSION: "26"
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: gradle
-
-      - name: Grant execute permission
-        run: chmod +x gradlew
+      - uses: actions/checkout@v7
+      - uses: ./.github/setup-environment
 
       - name: Build
-        run: ./gradlew build
+        run: ./gradlew assemble
 
   lint-and-code-style:
-    runs-on: ubuntu-latest
+    name: Lint and code style
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: gradle
-
-      - name: Grant execute permission
-        run: chmod +x gradlew
+      - uses: actions/checkout@v7
+      - uses: ./.github/setup-environment
 
       - name: Spotless Check
         run: ./gradlew spotlessCheck
@@ -53,24 +38,94 @@ jobs:
       - name: Checkstyle Check
         run: ./gradlew checkstyleMain
 
-  tests-and-coverage:
-    runs-on: ubuntu-latest
+      - name: Upload Checkstyle reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: checkstyle-reports
+          path: build/reports/checkstyle/main.*
+          if-no-files-found: warn
+          retention-days: 7
+
+  code-smell:
+    name: Code smell analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
+      - uses: ./.github/setup-environment
 
-      - name: Setup Java
-        uses: actions/setup-java@v5
+      - name: PMD analysis
+        run: ./gradlew pmdMain
+
+      - name: Upload PMD reports
+        if: always()
+        uses: actions/upload-artifact@v7
         with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: gradle
+          name: pmd-reports
+          path: build/reports/pmd/main.*
+          if-no-files-found: warn
+          retention-days: 7
 
-      - name: Grant execute permission
-        run: chmod +x gradlew
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/setup-environment
 
       - name: Run tests
         run: ./gradlew test
 
-      - name: Check test coverage
-        run: ./gradlew jacocoTestCoverageVerification
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-test-reports
+          path: |
+            build/reports/tests/test/
+            build/test-results/test/*.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload unit coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-unit
+          path: build/jacoco/test.exec
+          if-no-files-found: error
+          retention-days: 1
+
+  test-coverage-validation:
+    name: Test coverage validation
+    needs: unit-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/setup-environment
+
+      - name: Download unit test coverage
+        uses: actions/download-artifact@v7
+        with:
+          name: coverage-unit
+          path: build/coverage-input
+
+      - name: Generate combined coverage report
+        run: ./gradlew jacocoAggregateReport --stacktrace
+
+      - name: Validate combined coverage
+        run: ./gradlew jacocoAggregateCoverageVerification --stacktrace
+
+      - name: Upload combined JaCoCo report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jacoco-combined-report
+          path: build/reports/jacoco/jacocoAggregateReport
+          if-no-files-found: warn
+          retention-days: 7

@@ -1,0 +1,15 @@
+name: Setup Environment
+description: Sets up Java and Gradle wrapper permissions
+runs:
+  using: composite
+  steps:
+    - name: Setup Java
+      uses: actions/setup-java@v6
+      with:
+        distribution: temurin
+        java-version: ${{ env.JAVA_VERSION }}
+        cache: gradle
+
+    - name: Grant execution permission to Gradle Wrapper
+      run: chmod +x ./gradlew
+      shell: bash

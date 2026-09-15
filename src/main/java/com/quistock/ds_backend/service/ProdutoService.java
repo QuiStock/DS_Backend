@@ -11,6 +11,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Objects;
 import java.util.TreeSet;
 import java.util.function.Function;
@@ -25,6 +26,7 @@ import org.springframework.web.client.RestClientException;
 
 @Service
 public class ProdutoService {
+  private static final int MAX_VALUES_WITHOUT_DIVERGENCE = 1;
 
   private static final Logger LOGGER = LoggerFactory.getLogger(ProdutoService.class);
   private static final ParameterizedTypeReference<List<LoteErpDTO>> LOTES_TYPE =
@@ -121,14 +123,14 @@ public class ProdutoService {
       Function<LoteErpDTO, Object> campo,
       String nomeCampo,
       ChaveProdutoFilial chave) {
-    TreeSet<Integer> valores =
+    NavigableSet<Integer> valores =
         lotes.stream()
             .map(campo)
             .map(ErpValueParser::toInteger)
             .filter(Objects::nonNull)
             .collect(Collectors.toCollection(TreeSet::new));
 
-    if (valores.size() > 1) {
+    if (valores.size() > MAX_VALUES_WITHOUT_DIVERGENCE && LOGGER.isWarnEnabled()) {
       LOGGER.warn(
           "Valores divergentes para {} no agrupamento {}:{}; usando o maior valor: {}",
           nomeCampo,

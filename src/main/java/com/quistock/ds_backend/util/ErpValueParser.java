@@ -66,7 +66,8 @@ public final class ErpValueParser {
       try {
         return LocalDate.parse(text).atStartOfDay(ZoneOffset.UTC).toInstant();
       } catch (DateTimeParseException dateException) {
-        throw new IllegalArgumentException("Data inválida recebida do ERP.", dateException);
+        exception.addSuppressed(dateException);
+        throw new IllegalArgumentException("Data inválida recebida do ERP.", exception);
       }
     }
   }
