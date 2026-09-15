@@ -36,3 +36,8 @@ out/
 
 ### VS Code ###
 .vscode/
+
+# Local runtime files used by the Windows Java/Gradle workaround
+.jdk17/
+.gradle-unixdomain/
+backend-run*.log
