@@ -2,6 +2,7 @@ package com.quistock.ds_backend.controller;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -14,6 +15,7 @@ import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.service.FlowService;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -40,6 +42,26 @@ class FlowControllerTest {
         .andExpect(jsonPath("$.status").value("ANALYZED"))
         .andExpect(jsonPath("$.daily_sales_average").value(5.14))
         .andExpect(jsonPath("$.stock_coverage_days").value(9.92));
+  }
+
+  @Test
+  void shouldListFlowsUsingContractFilters() throws Exception {
+    FlowService flowService = mock(FlowService.class);
+    when(flowService.listFlows("LOW", "PROD001:FIL001", "ANALYZED")).thenReturn(List.of(flow()));
+
+    mockMvc(flowService)
+        .perform(
+            get("/api/flows")
+                .contextPath("/api")
+                .queryParam("flow_type", "LOW")
+                .queryParam("product_id", "PROD001:FIL001")
+                .queryParam("status", "ANALYZED"))
+        .andExpect(status().isOk())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+        .andExpect(jsonPath("$[0].id").value("101"))
+        .andExpect(jsonPath("$[0].product_id").value("PROD001:FIL001"))
+        .andExpect(jsonPath("$[0].flow_type").value("LOW"))
+        .andExpect(jsonPath("$[0].status").value("ANALYZED"));
   }
 
   @Test

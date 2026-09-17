@@ -51,7 +51,15 @@ public class FlowService {
   }
 
   public List<FlowDTO> listFlows() {
-    return List.copyOf(flows);
+    return listFlows(null, null, null);
+  }
+
+  public List<FlowDTO> listFlows(String flowType, String productId, String status) {
+    return flows.stream()
+        .filter(flow -> flowType == null || flowType.equals(flow.flowType()))
+        .filter(flow -> productId == null || productId.equals(flow.productId()))
+        .filter(flow -> status == null || status.equals(flow.status()))
+        .toList();
   }
 
   private BigDecimal calculateDailySalesAverage(ProductDTO product) {
