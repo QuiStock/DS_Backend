@@ -1,6 +1,7 @@
 package com.quistock.ds_backend.service;
 
 import com.quistock.ds_backend.model.dto.ActionDTO;
+import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
 import java.util.List;
@@ -14,7 +15,7 @@ public class ActionService {
 
   private final FlowService flowService;
   private final AtomicLong nextId = new AtomicLong(500);
-  private final List<ActionDTO> actions = new CopyOnWriteArrayList<>();
+  private final List<StoredAction> actions = new CopyOnWriteArrayList<>();
 
   public ActionService(FlowService service) {
     this.flowService = service;
@@ -28,8 +29,32 @@ public class ActionService {
             actionType(flow.flowType()),
             SUGGESTED_STATUS,
             justification(flow.flowType()));
-    actions.add(action);
+    actions.add(new StoredAction(flow.id(), flow.productName(), action));
     return new GenerateActionsResponse(flow.id(), List.of(action));
+  }
+
+  public List<ActionListItemDTO> listActions() {
+    return listActions(null, null, null);
+  }
+
+  public List<ActionListItemDTO> listActions(String status, String actionType, String flowId) {
+    return actions.stream()
+        .filter(stored -> status == null || status.equals(stored.action().status()))
+        .filter(stored -> actionType == null || actionType.equals(stored.action().actionType()))
+        .filter(stored -> flowId == null || flowId.equals(stored.flowId()))
+        .map(this::toListItem)
+        .toList();
+  }
+
+  private ActionListItemDTO toListItem(StoredAction stored) {
+    ActionDTO action = stored.action();
+    return new ActionListItemDTO(
+        action.id(),
+        stored.flowId(),
+        stored.productName(),
+        action.actionType(),
+        action.status(),
+        action.justification());
   }
 
   private String actionType(String flowType) {
@@ -49,4 +74,6 @@ public class ActionService {
       default -> throw new IllegalArgumentException("Unsupported flow type: " + flowType);
     };
   }
+
+  private record StoredAction(String flowId, String productName, ActionDTO action) {}
 }
