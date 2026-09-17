@@ -3,15 +3,19 @@ package com.quistock.ds_backend.controller;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.quistock.ds_backend.exception.ActionNotFoundException;
 import com.quistock.ds_backend.exception.FlowNotFoundException;
+import com.quistock.ds_backend.exception.InvalidActionStatusException;
 import com.quistock.ds_backend.handler.ApiExceptionHandler;
 import com.quistock.ds_backend.model.dto.ActionDTO;
 import com.quistock.ds_backend.model.dto.ActionListItemDTO;
+import com.quistock.ds_backend.model.dto.ActionStatusResponse;
 import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
 import com.quistock.ds_backend.service.ActionService;
 import java.util.List;
@@ -87,6 +91,56 @@ class ActionControllerTest {
         .andExpect(jsonPath("$[0].product_name").value("Whole Milk 1L"))
         .andExpect(jsonPath("$[0].action_type").value("PROMOTION"))
         .andExpect(jsonPath("$[0].status").value("SUGGESTED"));
+  }
+
+  @Test
+  void shouldUpdateActionStatusOnPublicRoute() throws Exception {
+    ActionService actionService = mock(ActionService.class);
+    when(actionService.updateActionStatus("501", "APPROVED"))
+        .thenReturn(new ActionStatusResponse("501", "APPROVED"));
+
+    mockMvc(actionService)
+        .perform(
+            patch("/api/actions/501/status")
+                .contextPath("/api")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"APPROVED\"}"))
+        .andExpect(status().isOk())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+        .andExpect(jsonPath("$.id").value("501"))
+        .andExpect(jsonPath("$.status").value("APPROVED"));
+  }
+
+  @Test
+  void shouldReturn404WhenActionIsNotFound() throws Exception {
+    ActionService actionService = mock(ActionService.class);
+    when(actionService.updateActionStatus("UNKNOWN", "APPROVED"))
+        .thenThrow(new ActionNotFoundException("UNKNOWN"));
+
+    mockMvc(actionService)
+        .perform(
+            patch("/api/actions/UNKNOWN/status")
+                .contextPath("/api")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"APPROVED\"}"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.error").value("ACTION_NOT_FOUND"));
+  }
+
+  @Test
+  void shouldReturn400ForUnsupportedActionStatus() throws Exception {
+    ActionService actionService = mock(ActionService.class);
+    when(actionService.updateActionStatus("501", "INVALID"))
+        .thenThrow(new InvalidActionStatusException("INVALID"));
+
+    mockMvc(actionService)
+        .perform(
+            patch("/api/actions/501/status")
+                .contextPath("/api")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"INVALID\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
   }
 
   private MockMvc mockMvc(ActionService actionService) {

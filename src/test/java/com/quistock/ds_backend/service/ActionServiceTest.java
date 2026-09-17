@@ -5,9 +5,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.quistock.ds_backend.exception.ActionNotFoundException;
 import com.quistock.ds_backend.exception.FlowNotFoundException;
+import com.quistock.ds_backend.exception.InvalidActionStatusException;
 import com.quistock.ds_backend.model.dto.ActionDTO;
 import com.quistock.ds_backend.model.dto.ActionListItemDTO;
+import com.quistock.ds_backend.model.dto.ActionStatusResponse;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
 import java.math.BigDecimal;
@@ -86,6 +89,36 @@ class ActionServiceTest {
               assertThat(action.actionType()).isEqualTo("PROMOTION");
               assertThat(action.status()).isEqualTo("SUGGESTED");
             });
+  }
+
+  @Test
+  void shouldUpdateActionStatus() {
+    when(flowService.findFlowById("101")).thenReturn(flow("101", "LOW"));
+    actionService.generateActions("101");
+
+    ActionStatusResponse response = actionService.updateActionStatus("501", "APPROVED");
+
+    assertThat(response.id()).isEqualTo("501");
+    assertThat(response.status()).isEqualTo("APPROVED");
+    assertThat(actionService.listActions("APPROVED", null, "101"))
+        .singleElement()
+        .extracting(ActionListItemDTO::status)
+        .isEqualTo("APPROVED");
+  }
+
+  @Test
+  void shouldRejectUnsupportedActionStatus() {
+    when(flowService.findFlowById("101")).thenReturn(flow("101", "LOW"));
+    actionService.generateActions("101");
+
+    assertThatThrownBy(() -> actionService.updateActionStatus("501", "INVALID"))
+        .isInstanceOf(InvalidActionStatusException.class);
+  }
+
+  @Test
+  void shouldRejectUnknownAction() {
+    assertThatThrownBy(() -> actionService.updateActionStatus("UNKNOWN", "APPROVED"))
+        .isInstanceOf(ActionNotFoundException.class);
   }
 
   private void assertPromotion(ActionDTO action) {
