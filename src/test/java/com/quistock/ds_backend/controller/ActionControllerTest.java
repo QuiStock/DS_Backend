@@ -2,6 +2,7 @@ package com.quistock.ds_backend.controller;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -10,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.quistock.ds_backend.exception.FlowNotFoundException;
 import com.quistock.ds_backend.handler.ApiExceptionHandler;
 import com.quistock.ds_backend.model.dto.ActionDTO;
+import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
 import com.quistock.ds_backend.service.ActionService;
 import java.util.List;
@@ -56,6 +58,35 @@ class ActionControllerTest {
                 .content("{\"flow_id\":\"UNKNOWN\"}"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.error").value("FLOW_NOT_FOUND"));
+  }
+
+  @Test
+  void shouldListActionsUsingContractFilters() throws Exception {
+    ActionService actionService = mock(ActionService.class);
+    ActionListItemDTO action =
+        new ActionListItemDTO(
+            "501",
+            "101",
+            "Whole Milk 1L",
+            "PROMOTION",
+            "SUGGESTED",
+            "Product has expiration or excess stock risk.");
+    when(actionService.listActions("SUGGESTED", "PROMOTION", "101")).thenReturn(List.of(action));
+
+    mockMvc(actionService)
+        .perform(
+            get("/api/actions")
+                .contextPath("/api")
+                .queryParam("status", "SUGGESTED")
+                .queryParam("action_type", "PROMOTION")
+                .queryParam("flow_id", "101"))
+        .andExpect(status().isOk())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+        .andExpect(jsonPath("$[0].id").value("501"))
+        .andExpect(jsonPath("$[0].flow_id").value("101"))
+        .andExpect(jsonPath("$[0].product_name").value("Whole Milk 1L"))
+        .andExpect(jsonPath("$[0].action_type").value("PROMOTION"))
+        .andExpect(jsonPath("$[0].status").value("SUGGESTED"));
   }
 
   private MockMvc mockMvc(ActionService actionService) {

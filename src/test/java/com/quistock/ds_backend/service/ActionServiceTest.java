@@ -7,10 +7,12 @@ import static org.mockito.Mockito.when;
 
 import com.quistock.ds_backend.exception.FlowNotFoundException;
 import com.quistock.ds_backend.model.dto.ActionDTO;
+import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -60,6 +62,30 @@ class ActionServiceTest {
 
     assertThatThrownBy(() -> actionService.generateActions("UNKNOWN"))
         .isInstanceOf(FlowNotFoundException.class);
+  }
+
+  @Test
+  void shouldListActionsUsingContractFilters() {
+    when(flowService.findFlowById("101")).thenReturn(flow("101", "LOW"));
+    when(flowService.findFlowById("102")).thenReturn(flow("102", "HIGH"));
+
+    actionService.generateActions("101");
+    actionService.generateActions("102");
+
+    assertThat(actionService.listActions()).hasSize(2);
+
+    List<ActionListItemDTO> actions = actionService.listActions("SUGGESTED", "PROMOTION", "101");
+
+    assertThat(actions)
+        .singleElement()
+        .satisfies(
+            action -> {
+              assertThat(action.id()).isEqualTo("501");
+              assertThat(action.flowId()).isEqualTo("101");
+              assertThat(action.productName()).isEqualTo("Whole Milk 1L");
+              assertThat(action.actionType()).isEqualTo("PROMOTION");
+              assertThat(action.status()).isEqualTo("SUGGESTED");
+            });
   }
 
   private void assertPromotion(ActionDTO action) {
