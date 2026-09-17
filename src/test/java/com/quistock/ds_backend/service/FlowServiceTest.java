@@ -96,6 +96,21 @@ class FlowServiceTest {
     assertThat(flowService.listFlows()).hasSize(1);
   }
 
+  @Test
+  void shouldFilterFlowsByTypeProductAndStatus() {
+    ProductDTO lowRiskProduct = product("PROD001:FIL001", 100, 40, 0, 0, null, 5);
+    ProductDTO highRiskProduct = product("PROD002:FIL002", 5, 40, 14, 60, 365, 5);
+    when(productService.findProductById(lowRiskProduct.id())).thenReturn(lowRiskProduct);
+    when(productService.findProductById(highRiskProduct.id())).thenReturn(highRiskProduct);
+
+    flowService.analyzeProduct(lowRiskProduct.id());
+    flowService.analyzeProduct(highRiskProduct.id());
+
+    assertThat(flowService.listFlows("LOW", null, "ANALYZED")).hasSize(1);
+    assertThat(flowService.listFlows(null, highRiskProduct.id(), null)).hasSize(1);
+    assertThat(flowService.listFlows(null, null, "ANALYZED")).hasSize(2);
+  }
+
   private ProductDTO product(
       Integer currentStock,
       Integer minimumStock,
@@ -103,8 +118,20 @@ class FlowServiceTest {
       Integer sales30d,
       Integer expirationDays,
       Integer leadTime) {
+    return product(
+        "PROD001:FIL001", currentStock, minimumStock, sales7d, sales30d, expirationDays, leadTime);
+  }
+
+  private ProductDTO product(
+      String productId,
+      Integer currentStock,
+      Integer minimumStock,
+      Integer sales7d,
+      Integer sales30d,
+      Integer expirationDays,
+      Integer leadTime) {
     return new ProductDTO(
-        "PROD001:FIL001",
+        productId,
         "PROD001",
         "Whole Milk 1L",
         "Dairy",
