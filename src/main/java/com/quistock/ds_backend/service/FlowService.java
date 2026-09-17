@@ -1,5 +1,6 @@
 package com.quistock.ds_backend.service;
 
+import com.quistock.ds_backend.exception.FlowNotFoundException;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.ProductDTO;
 import java.math.BigDecimal;
@@ -60,6 +61,13 @@ public class FlowService {
         .filter(flow -> productId == null || productId.equals(flow.productId()))
         .filter(flow -> status == null || status.equals(flow.status()))
         .toList();
+  }
+
+  public FlowDTO findFlowById(String id) {
+    return flows.stream()
+        .filter(flow -> id != null && id.equals(flow.id()))
+        .findFirst()
+        .orElseThrow(() -> new FlowNotFoundException(id));
   }
 
   private BigDecimal calculateDailySalesAverage(ProductDTO product) {
