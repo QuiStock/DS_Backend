@@ -1,14 +1,18 @@
 package com.quistock.ds_backend.controller;
 
 import com.quistock.ds_backend.model.dto.ActionListItemDTO;
+import com.quistock.ds_backend.model.dto.ActionStatusResponse;
 import com.quistock.ds_backend.model.dto.GenerateActionsRequest;
 import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
+import com.quistock.ds_backend.model.dto.UpdateActionStatusRequest;
 import com.quistock.ds_backend.service.ActionService;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -37,5 +41,11 @@ public class ActionController {
       @RequestParam(name = "action_type", required = false) String actionType,
       @RequestParam(name = "flow_id", required = false) String flowId) {
     return actionService.listActions(status, actionType, flowId);
+  }
+
+  @PatchMapping("/{id}/status")
+  public ActionStatusResponse updateActionStatus(
+      @PathVariable String id, @Valid @RequestBody UpdateActionStatusRequest request) {
+    return actionService.updateActionStatus(id, request.status());
   }
 }
