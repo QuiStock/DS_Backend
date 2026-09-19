@@ -41,3 +41,4 @@ out/
 .jdk17/
 .gradle-unixdomain/
 backend-run*.log
+.gradle-user-home/
