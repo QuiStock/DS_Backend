@@ -38,9 +38,7 @@ public class DashboardService {
     List<FlowDTO> latestFlows = latestFlowsByProduct();
     List<ActionListItemDTO> allActions = actionService.listActions();
     List<ActionListItemDTO> suggestedActions =
-        allActions.stream()
-            .filter(action -> SUGGESTED_STATUS.equals(action.status()))
-            .toList();
+        allActions.stream().filter(action -> SUGGESTED_STATUS.equals(action.status())).toList();
     List<ProductDTO> products = productService.listProducts(null, null, null);
 
     return new DashboardSummaryDTO(

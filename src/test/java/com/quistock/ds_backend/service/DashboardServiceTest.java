@@ -25,8 +25,7 @@ class DashboardServiceTest {
     flowService = mock(FlowService.class);
     actionService = mock(ActionService.class);
     productService = mock(ProductService.class);
-    dashboardService =
-        new DashboardService(flowService, actionService, productService, 30);
+    dashboardService = new DashboardService(flowService, actionService, productService, 30);
   }
 
   @Test
