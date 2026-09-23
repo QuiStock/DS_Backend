@@ -19,7 +19,8 @@ class DashboardControllerTest {
   @Test
   void shouldReturnDashboardSummaryOnPublicRoute() throws Exception {
     DashboardService dashboardService = mock(DashboardService.class);
-    when(dashboardService.getSummary()).thenReturn(new DashboardSummaryDTO(5, 1, 2, 2, 3, 2, 1));
+    when(dashboardService.getSummary())
+        .thenReturn(new DashboardSummaryDTO(5, 1, 2, 2, 3, 2, 1, 4, 2, 3, 5));
 
     mockMvc(dashboardService)
         .perform(get("/api/dashboard/summary").contextPath("/api"))
@@ -31,7 +32,11 @@ class DashboardControllerTest {
         .andExpect(jsonPath("$.low_risk_products").value(2))
         .andExpect(jsonPath("$.suggested_actions").value(3))
         .andExpect(jsonPath("$.suggested_promotions").value(2))
-        .andExpect(jsonPath("$.suggested_stock_orders").value(1));
+        .andExpect(jsonPath("$.suggested_stock_orders").value(1))
+        .andExpect(jsonPath("$.near_expiry_products").value(4))
+        .andExpect(jsonPath("$.stockout_products").value(2))
+        .andExpect(jsonPath("$.overstock_products").value(3))
+        .andExpect(jsonPath("$.active_actions").value(5));
   }
 
   private MockMvc mockMvc(DashboardService dashboardService) {

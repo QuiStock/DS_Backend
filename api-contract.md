@@ -459,9 +459,26 @@ Response 200:
   "low_risk_products": 2,
   "suggested_actions": 3,
   "suggested_promotions": 2,
-  "suggested_stock_orders": 1
+  "suggested_stock_orders": 1,
+  "near_expiry_products": 4,
+  "stockout_products": 2,
+  "overstock_products": 3,
+  "active_actions": 5
 }
 ```
+
+The four additional Big Numbers are calculated from the consolidated products and the
+actions already managed by the backend. Products are counted by product and branch, not
+by individual ERP batch.
+
+- `near_expiry_products`: positive stock and nearest expiration within the configured
+  limit, with a default of 30 days.
+- `stockout_products`: consolidated stock less than or equal to zero.
+- `overstock_products`: consolidated stock greater than minimum stock.
+- `active_actions`: actions with `SUGGESTED` or `APPROVED` status.
+
+The expiration threshold can be configured with `dashboard.short-expiry-days` or the
+`DASHBOARD_SHORT_EXPIRY_DAYS` environment variable.
 
 ---
 
