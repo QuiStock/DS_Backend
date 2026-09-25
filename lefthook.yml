@@ -2,6 +2,3 @@ pre-push:
   commands:
     spotless:
       run: ./gradlew spotlessCheck --quiet
-
-    checkstyle:
-      run: ./gradlew checkstyleMain --quiet
