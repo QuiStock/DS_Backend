@@ -9,4 +9,8 @@ public record DashboardSummaryDTO(
     @JsonProperty("low_risk_products") int lowRiskProducts,
     @JsonProperty("suggested_actions") int suggestedActions,
     @JsonProperty("suggested_promotions") int suggestedPromotions,
-    @JsonProperty("suggested_stock_orders") int suggestedStockOrders) {}
+    @JsonProperty("suggested_stock_orders") int suggestedStockOrders,
+    @JsonProperty("near_expiry_products") long nearExpiryProducts,
+    @JsonProperty("stockout_products") long stockoutProducts,
+    @JsonProperty("overstock_products") long overstockProducts,
+    @JsonProperty("active_actions") long activeActions) {}
