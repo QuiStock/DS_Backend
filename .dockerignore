@@ -1,0 +1,20 @@
+# Send only the Gradle build definition, wrapper, and production sources.
+**
+!build.gradle
+!settings.gradle
+!gradle.properties
+!gradlew
+!gradle/
+!gradle/wrapper/
+!gradle/wrapper/**
+!src/
+!src/main/
+!src/main/**
+LICENSE
+makefile
+README.md
+lefthook.yml
+Dockerfile
+api-contract.md
+.gitignore
+.gitattributes
