@@ -75,7 +75,7 @@ jobs:
           if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
               raise SystemExit(f"Unexpected image digest: {digest!r}")
 
-          path = Path("infra/clusters/expotech/apps/ds-backend/deployment.yaml")
+          path = Path("infra/clusters/expotech/apps/api-core/deployment.yaml")
           manifest = path.read_text(encoding="utf-8")
           image = f"ghcr.io/quistock/ds-backend@{digest}"
           pattern = r"(?m)^([ \t]*image:[ \t]*)ghcr\.io/quistock/ds-backend(?:[:@])[^\s]+$"
@@ -90,14 +90,14 @@ jobs:
         with:
           path: infra
           token: ${{ secrets.INFRA_REPO_TOKEN }}
-          add-paths: clusters/expotech/apps/ds-backend/deployment.yaml
+          add-paths: clusters/expotech/apps/api-core/deployment.yaml
           base: main
-          branch: deploy/ds-backend-${{ github.event.release.tag_name }}
+          branch: deploy/api-core-${{ github.event.release.tag_name }}
           delete-branch: true
-          commit-message: "deploy(ds-backend): ${{ github.event.release.tag_name }}"
-          title: "deploy(ds-backend): ${{ github.event.release.tag_name }}"
+          commit-message: "deploy(api-core): ${{ github.event.release.tag_name }}"
+          title: "deploy(api-core): ${{ github.event.release.tag_name }}"
           body: |
-            Atualiza o DS_Backend para a release [${{ github.event.release.tag_name }}](${{ github.event.release.html_url }}).
+            Atualiza a API Core (DS_Backend) para a release [${{ github.event.release.tag_name }}](${{ github.event.release.html_url }}).
             Imagem publicada: `ghcr.io/quistock/ds-backend@${{ steps.image.outputs.digest }}`.
 
             O rolling update começa depois do merge desta PR, quando o Argo CD sincronizar o Infra.
