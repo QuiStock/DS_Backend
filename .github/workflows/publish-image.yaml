@@ -15,6 +15,16 @@ jobs:
     timeout-minutes: 45
 
     steps:
+      - name: Check Infra token
+        env:
+          INFRA_REPO_TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "$INFRA_REPO_TOKEN" ]; then
+            echo "Configure the INFRA_REPO_TOKEN repository secret before publishing a release."
+            exit 1
+          fi
+
       - name: Check out release commit
         uses: actions/checkout@v7
 
@@ -32,6 +42,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and publish ARM64 image
+        id: image
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -41,3 +52,52 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/QuiStock/DS_Backend
             org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Check out Infra repository
+        uses: actions/checkout@v7
+        with:
+          repository: QuiStock/QuiStock-Infra
+          ref: main
+          path: infra
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+
+      - name: Update desired image in Infra
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          digest = os.environ["IMAGE_DIGEST"]
+          if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+              raise SystemExit(f"Unexpected image digest: {digest!r}")
+
+          path = Path("infra/clusters/expotech/apps/ds-backend/deployment.yaml")
+          manifest = path.read_text(encoding="utf-8")
+          image = f"ghcr.io/quistock/ds-backend@{digest}"
+          pattern = r"(?m)^([ \t]*image:[ \t]*)ghcr\.io/quistock/ds-backend(?:[:@])[^\s]+$"
+          updated, count = re.subn(pattern, lambda match: match.group(1) + image, manifest)
+          if count != 1:
+              raise SystemExit(f"Expected one DS Backend image, found {count}")
+          path.write_text(updated, encoding="utf-8")
+          PY
+
+      - name: Open deployment PR in Infra
+        uses: peter-evans/create-pull-request@v8
+        with:
+          path: infra
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+          add-paths: clusters/expotech/apps/ds-backend/deployment.yaml
+          base: main
+          branch: deploy/ds-backend-${{ github.event.release.tag_name }}
+          delete-branch: true
+          commit-message: "deploy(ds-backend): ${{ github.event.release.tag_name }}"
+          title: "deploy(ds-backend): ${{ github.event.release.tag_name }}"
+          body: |
+            Atualiza o DS_Backend para a release [${{ github.event.release.tag_name }}](${{ github.event.release.html_url }}).
+            Imagem publicada: `ghcr.io/quistock/ds-backend@${{ steps.image.outputs.digest }}`.
+
+            O rolling update começa depois do merge desta PR, quando o Argo CD sincronizar o Infra.
