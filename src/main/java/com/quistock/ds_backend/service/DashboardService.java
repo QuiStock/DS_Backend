@@ -4,6 +4,7 @@ import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.DashboardSummaryDTO;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.ProductDTO;
+import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,8 +16,9 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class DashboardService {
-  private static final String SUGGESTED_STATUS = "SUGGESTED";
-  private static final Set<String> ACTIVE_ACTION_STATUSES = Set.of("SUGGESTED", "APPROVED");
+  private static final String GENERATED_STATUS = "GENERATED";
+  private static final Set<String> ACTIVE_ACTION_STATUSES =
+      Set.of("GENERATED", "IN_EMPLOYEE_TRIAGE", "SENT_TO_MANAGER", "APPROVED");
 
   private final FlowService flowService;
   private final ActionService actionService;
@@ -38,7 +40,7 @@ public class DashboardService {
     List<FlowDTO> latestFlows = latestFlowsByProduct();
     List<ActionListItemDTO> allActions = actionService.listActions();
     List<ActionListItemDTO> suggestedActions =
-        allActions.stream().filter(action -> SUGGESTED_STATUS.equals(action.status())).toList();
+        allActions.stream().filter(action -> GENERATED_STATUS.equals(action.status())).toList();
     List<ProductDTO> products = productService.listProducts(null, null, null);
 
     return new DashboardSummaryDTO(
@@ -48,7 +50,7 @@ public class DashboardService {
         countByFlowType(latestFlows, "LOW"),
         suggestedActions.size(),
         countByActionType(suggestedActions, "PROMOTION"),
-        countByActionType(suggestedActions, "STOCK_ORDER"),
+        countByActionType(suggestedActions, "ORDER"),
         products.stream().filter(this::isNearExpiration).count(),
         products.stream().filter(this::isStockout).count(),
         products.stream().filter(this::isOverstock).count(),
@@ -78,19 +80,23 @@ public class DashboardService {
 
   private boolean isNearExpiration(ProductDTO product) {
     return product.currentStock() != null
-        && product.currentStock() > 0
+        && decimal(product.currentStock()).signum() > 0
         && product.expirationDays() != null
         && product.expirationDays() <= shortExpiryDays;
   }
 
   private boolean isStockout(ProductDTO product) {
-    return product.currentStock() != null && product.currentStock() <= 0;
+    return product.currentStock() != null && decimal(product.currentStock()).signum() <= 0;
   }
 
   private boolean isOverstock(ProductDTO product) {
     return product.currentStock() != null
         && product.minimumStock() != null
-        && product.currentStock() > product.minimumStock();
+        && decimal(product.currentStock()).compareTo(decimal(product.minimumStock())) > 0;
+  }
+
+  private BigDecimal decimal(Number value) {
+    return new BigDecimal(value.toString());
   }
 
   private boolean isActiveAction(ActionListItemDTO action) {

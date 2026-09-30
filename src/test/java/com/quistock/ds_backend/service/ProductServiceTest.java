@@ -255,6 +255,60 @@ class ProductServiceTest {
   }
 
   @Test
+  void shouldUseTheLatestEntryTimeWhenBatchesArriveOnTheSameDate() {
+    String erpResponse =
+        """
+        [
+          {
+            "id": "z-old",
+            "codigo_produto_erp": "PROD001",
+            "nome_produto": "Whole Milk 1L",
+            "categoria": "Dairy",
+            "data_validade": "2026-10-30",
+            "quantidade": 40,
+            "preco": 7.99,
+            "custo": 5.20,
+            "codigo_filial_erp": "FIL001",
+            "filial": "Santana Store",
+            "data_entrada": "2026-08-25T09:00:00Z",
+            "vendas_7d": 10,
+            "vendas_30d": 20,
+            "estoque_minimo": 40,
+            "lead_time_dias": 5
+          },
+          {
+            "id": "a-new",
+            "codigo_produto_erp": "PROD001",
+            "nome_produto": "Whole Milk 1L",
+            "categoria": "Dairy",
+            "data_validade": "2026-10-30",
+            "quantidade": 40,
+            "preco": 8.49,
+            "custo": 5.80,
+            "codigo_filial_erp": "FIL001",
+            "filial": "Santana Store",
+            "data_entrada": "2026-08-25T21:00:00Z",
+            "vendas_7d": 10,
+            "vendas_30d": 20,
+            "estoque_minimo": 40,
+            "lead_time_dias": 5
+          }
+        ]
+        """;
+    server
+        .expect(requestTo("http://erp.test/products"))
+        .andExpect(method(GET))
+        .andRespond(withSuccess(erpResponse, MediaType.APPLICATION_JSON));
+
+    ProductDTO product = productService.listProducts(null, null, null).get(0);
+    server.verify();
+
+    assertThat(product.price()).isEqualByComparingTo("8.49");
+    assertThat(product.cost()).isEqualByComparingTo("5.80");
+    assertThat(product.lastRestock()).isEqualTo(Instant.parse("2026-08-25T21:00:00Z"));
+  }
+
+  @Test
   void shouldConvertUnixTimestampToExpirationDate() {
     long timestamp = Instant.parse("2026-09-15T00:00:00Z").getEpochSecond();
     ErpBatchDTO batch =

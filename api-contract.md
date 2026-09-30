@@ -1,7 +1,7 @@
 # QuiStock API Contract
 
-Version: 1.1.0
-Last updated: 2026-08-28
+Version: 1.3.0
+Last updated: 2026-09-30
 
 ## Base URL
 
@@ -19,8 +19,9 @@ For the MVP, the ERP is represented by a MockAPI containing fake data with the s
 structure as a real ERP integration.
 
 The external endpoint consumed by the backend is `GET /products`. Each returned record
-represents an ERP batch, not a consolidated product. The backend normalizes the records,
-groups batches by product and branch, and exposes a stable product model to the frontend.
+represents an ERP batch, not a consolidated product. The backend periodically synchronizes
+the response into PostgreSQL, groups batches by product and branch, and serves the saved
+snapshot to the frontend. When no snapshot exists, the first product read triggers a sync.
 
 The external MockAPI currently uses Portuguese field names. Those names are kept only at
 the integration boundary; all public API fields and internal code identifiers are English.
@@ -46,10 +47,10 @@ Response 200:
     "sku": "PROD001",
     "name": "Whole Milk 1L",
     "category": "Dairy",
-    "current_stock": 121,
-    "minimum_stock": 40,
-    "sales_7d": 50,
-    "sales_30d": 200,
+    "current_stock": 121.000,
+    "minimum_stock": 40.000,
+    "sales_7d": 50.000,
+    "sales_30d": 200.000,
     "expiration_days": 12,
     "supplier_lead_time": 5,
     "price": 7.99,
@@ -81,19 +82,23 @@ Transformation rules:
 - `name` receives `nome_produto`.
 - `category` receives `categoria`.
 - `branch` receives `filial`.
-- `current_stock` is the sum of `quantidade` for all batches in the group.
-- `sales_7d` is the sum of `vendas_7d` for all batches in the group.
-- `sales_30d` is the sum of `vendas_30d` for all batches in the group.
+- `current_stock` is the decimal sum of `quantidade` for active batches in the saved snapshot.
+- `sales_7d` is the decimal sum of `vendas_7d` for all batches in the group.
+- `sales_30d` is the decimal sum of `vendas_30d` for all batches in the group.
 - `expiration_days` is calculated using the nearest expiration date among batches with
   quantity greater than zero.
-- `minimum_stock` is not summed. If batches disagree, the highest valid value is used and
-  the inconsistency is logged.
+- `minimum_stock` is not summed. If batches disagree, the highest valid value is saved for
+  the product and branch.
 - `supplier_lead_time` receives `lead_time_dias` and is not summed. If batches disagree,
-  the highest valid value is used and the inconsistency is logged.
-- `price` and `cost` come from the most recent batch according to `data_entrada`.
+  the highest valid value is saved for the product and branch.
+- `price`, `cost`, and `last_restock` come from the most recent batch according to `data_entrada`.
 - `status` is `true` when consolidated stock is greater than zero.
-- `id` is deterministic in this non-persistent stage:
+- `id` is deterministic from the ERP identifiers:
   `codigo_produto_erp:codigo_filial_erp`.
+
+The API preserves decimal quantities from PostgreSQL `NUMERIC(14,3)` fields. The ERP's
+7-day and 30-day sales aggregates are stored by product and branch because this endpoint does
+not return individual sales records to populate `sale` and `sale_item`.
 
 Internal batch fields such as `num_lote`, `certificado_qualidade`, `data_entrada`,
 `data_validade`, and `unidade_medida` are not exposed by this public route.
@@ -150,6 +155,7 @@ Response 200:
   "supplier_lead_time": 3,
   "price": 7.90,
   "cost": 4.50,
+  "last_restock": "2026-08-20T00:00:00Z",
   "status": true,
   "branch": "Downtown Store"
 }
@@ -249,7 +255,7 @@ Available parameters:
 
 - `flow_type`: `HIGH`, `MEDIUM`, or `LOW`.
 - `product_id`: filters flows for one product.
-- `status`: filters by analysis status.
+- `status`: `ANALYZED` in the MVP; filters by analysis status.
 
 ---
 
@@ -260,21 +266,24 @@ An action is the recommendation generated from a flow.
 Possible types:
 
 - `PROMOTION`
-- `STOCK_ORDER`
-- `MONITOR`
+- `ORDER`
 
 Possible statuses:
 
-- `SUGGESTED`
+- `GENERATED`
+- `IN_EMPLOYEE_TRIAGE`
+- `SENT_TO_MANAGER`
 - `APPROVED`
 - `REJECTED`
-- `COMPLETED`
 
 Generation rules:
 
-- `HIGH` flow generates `STOCK_ORDER`.
-- `MEDIUM` flow generates `MONITOR`.
+- `HIGH` flow generates `ORDER`.
+- `MEDIUM` flow does not generate a suggestion; its stock level is adequate.
 - `LOW` flow generates `PROMOTION`.
+
+The type and status values match the PostgreSQL enums. A generated action starts with
+`GENERATED`. Employee triage and manager decisions use the other statuses above.
 
 ---
 
@@ -288,9 +297,15 @@ Body:
 
 ```json
 {
-  "flow_id": "101"
+  "flow_id": "101",
+  "promotion_valid_from": "2026-10-01",
+  "promotion_valid_until": "2026-10-07"
 }
 ```
+
+`promotion_valid_from` and `promotion_valid_until` are required when the flow is `LOW` and
+therefore generates a promotion. The end date must be on or after the start date. Do not send
+these fields for an `ORDER`.
 
 Response 201:
 
@@ -301,8 +316,10 @@ Response 201:
     {
       "id": "501",
       "action_type": "PROMOTION",
-      "status": "SUGGESTED",
-      "justification": "Product has expiration or excess stock risk."
+      "status": "GENERATED",
+      "justification": "Expiration or excess-stock risk: create a promotion.",
+      "promotion_valid_from": "2026-10-01",
+      "promotion_valid_until": "2026-10-07"
     }
   ]
 }
@@ -325,8 +342,11 @@ Response 200:
     "flow_id": "101",
     "product_name": "Whole Milk 1L",
     "action_type": "PROMOTION",
-    "status": "SUGGESTED",
-    "justification": "Product has expiration risk."
+    "status": "GENERATED",
+    "justification": "Expiration or excess-stock risk: create a promotion.",
+    "promotion_valid_from": "2026-10-01",
+    "promotion_valid_until": "2026-10-07",
+    "decision_justification": null
   }
 ]
 ```
@@ -334,15 +354,15 @@ Response 200:
 ### Optional filters
 
 ```text
-GET /actions?status=SUGGESTED
+GET /actions?status=GENERATED
 GET /actions?action_type=PROMOTION
 GET /actions?flow_id=101
 ```
 
 Available parameters:
 
-- `status`: `SUGGESTED`, `APPROVED`, `REJECTED`, or `COMPLETED`.
-- `action_type`: `PROMOTION`, `STOCK_ORDER`, or `MONITOR`.
+- `status`: `GENERATED`, `IN_EMPLOYEE_TRIAGE`, `SENT_TO_MANAGER`, `APPROVED`, or `REJECTED`.
+- `action_type`: `PROMOTION` or `ORDER`.
 - `flow_id`: filters actions generated from one flow.
 
 ---
@@ -361,7 +381,20 @@ Body:
 
 ```json
 {
-  "status": "APPROVED"
+  "status": "APPROVED",
+  "final_promotion_valid_from": "2026-10-02",
+  "final_promotion_valid_until": "2026-10-08"
+}
+```
+
+Final promotion dates are optional and may be sent when approving a promotion. Send both or
+neither; the end date must be on or after the start date. A rejection must include a non-empty
+`justification`:
+
+```json
+{
+  "status": "REJECTED",
+  "justification": "The store cannot run a promotion this week."
 }
 ```
 
@@ -370,15 +403,23 @@ Response 200:
 ```json
 {
   "id": "501",
-  "status": "APPROVED"
+  "status": "APPROVED",
+  "promotion_valid_from": "2026-10-02",
+  "promotion_valid_until": "2026-10-08"
 }
 ```
 
 ---
 
-# 4. Chatbot
+# 4. Chatbot (future scope)
+
+The AI chatbot is not part of the current API contract or persistence scope. Define its route
+and conversation storage when that feature is implemented.
 
 ## 4.1 Send a chatbot message
+
+The following endpoint is a placeholder in the current code and does not provide an AI chatbot.
+Do not depend on it from the mobile app yet.
 
 Method:
 
@@ -427,14 +468,17 @@ Response 200:
   {
     "id": "1",
     "name": "Downtown Store",
-    "address": "1000 Paulista Avenue",
-    "city": "Sao Paulo",
-    "state": "SP",
-    "latitude": -23.561684,
-    "longitude": -46.655981
+    "address": null,
+    "city": null,
+    "state": null,
+    "latitude": null,
+    "longitude": null
   }
 ]
 ```
+
+The current ERP batch source provides only the branch code and name. Additional branch
+metadata is therefore returned as `null` until a branch metadata source is integrated.
 
 ---
 
@@ -475,7 +519,8 @@ by individual ERP batch.
   limit, with a default of 30 days.
 - `stockout_products`: consolidated stock less than or equal to zero.
 - `overstock_products`: consolidated stock greater than minimum stock.
-- `active_actions`: actions with `SUGGESTED` or `APPROVED` status.
+- `active_actions`: actions with `GENERATED`, `IN_EMPLOYEE_TRIAGE`, `SENT_TO_MANAGER`, or
+  `APPROVED` status.
 
 The expiration threshold can be configured with `dashboard.short-expiry-days` or the
 `DASHBOARD_SHORT_EXPIRY_DAYS` environment variable.
@@ -512,6 +557,32 @@ Status: `404 Not Found`
 {
   "error": "PRODUCT_NOT_FOUND",
   "message": "Product was not found for the provided ID."
+}
+```
+
+## Flow not found
+
+Returned by `POST /actions/generate` when the supplied flow ID does not exist.
+
+Status: `404 Not Found`
+
+```json
+{
+  "error": "FLOW_NOT_FOUND",
+  "message": "Flow was not found for the provided ID."
+}
+```
+
+## Action not found
+
+Returned by `PATCH /actions/{id}/status` when the supplied action ID does not exist.
+
+Status: `404 Not Found`
+
+```json
+{
+  "error": "ACTION_NOT_FOUND",
+  "message": "Action was not found for the provided ID."
 }
 ```
 

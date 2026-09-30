@@ -39,6 +39,23 @@ class ProductControllerTest {
   }
 
   @Test
+  void shouldBindAllProductFiltersFromTheQueryString() throws Exception {
+    ProductService productService = mock(ProductService.class);
+    when(productService.listProducts("Santana Store", "Dairy", true))
+        .thenReturn(List.of(product()));
+
+    createMockMvc(productService)
+        .perform(
+            get("/api/products")
+                .contextPath("/api")
+                .queryParam("branch", "Santana Store")
+                .queryParam("category", "Dairy")
+                .queryParam("status", "true"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].id").value("PROD001:FIL001"));
+  }
+
+  @Test
   void shouldReturn503WhenErpIsUnavailable() throws Exception {
     ProductService productService = mock(ProductService.class);
     when(productService.listProducts(null, null, null))
@@ -83,6 +100,32 @@ class ProductControllerTest {
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.error").value("PRODUCT_NOT_FOUND"))
         .andExpect(jsonPath("$.message").value("Product was not found for the provided ID."));
+  }
+
+  @Test
+  void shouldReturn503WhenErpIsUnavailableForProductLookup() throws Exception {
+    ProductService productService = mock(ProductService.class);
+    when(productService.findProductById("PROD001:FIL001"))
+        .thenThrow(
+            new ErpIntegrationException(
+                "Could not connect to the external ERP API.", new RuntimeException()));
+
+    createMockMvc(productService)
+        .perform(get("/api/products/PROD001:FIL001").contextPath("/api"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.error").value("ERP_UNAVAILABLE"));
+  }
+
+  @Test
+  void shouldReturnContractErrorForInvalidStatusFilter() throws Exception {
+    ProductService productService = mock(ProductService.class);
+
+    createMockMvc(productService)
+        .perform(get("/api/products").contextPath("/api").queryParam("status", "active"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
+        .andExpect(
+            jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   private MockMvc createMockMvc(ProductService productService) {

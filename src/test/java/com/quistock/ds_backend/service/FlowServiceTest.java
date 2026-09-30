@@ -1,9 +1,11 @@
 package com.quistock.ds_backend.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.quistock.ds_backend.exception.InvalidRequestException;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.ProductDTO;
 import java.math.BigDecimal;
@@ -109,6 +111,18 @@ class FlowServiceTest {
     assertThat(flowService.listFlows("LOW", null, "ANALYZED")).hasSize(1);
     assertThat(flowService.listFlows(null, highRiskProduct.id(), null)).hasSize(1);
     assertThat(flowService.listFlows(null, null, "ANALYZED")).hasSize(2);
+  }
+
+  @Test
+  void shouldRejectUnsupportedFlowTypeFilter() {
+    assertThatThrownBy(() -> flowService.listFlows("URGENT", null, null))
+        .isInstanceOf(InvalidRequestException.class);
+  }
+
+  @Test
+  void shouldRejectUnsupportedFlowStatusFilter() {
+    assertThatThrownBy(() -> flowService.listFlows(null, null, "PENDING"))
+        .isInstanceOf(InvalidRequestException.class);
   }
 
   private ProductDTO product(

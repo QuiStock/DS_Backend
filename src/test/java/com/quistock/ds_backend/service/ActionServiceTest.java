@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import com.quistock.ds_backend.exception.ActionNotFoundException;
 import com.quistock.ds_backend.exception.FlowNotFoundException;
 import com.quistock.ds_backend.exception.InvalidActionStatusException;
+import com.quistock.ds_backend.exception.InvalidRequestException;
 import com.quistock.ds_backend.model.dto.ActionDTO;
 import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.ActionStatusResponse;
@@ -89,6 +90,18 @@ class ActionServiceTest {
               assertThat(action.actionType()).isEqualTo("PROMOTION");
               assertThat(action.status()).isEqualTo("SUGGESTED");
             });
+  }
+
+  @Test
+  void shouldRejectUnsupportedStatusFilter() {
+    assertThatThrownBy(() -> actionService.listActions("ACTIVE", null, null))
+        .isInstanceOf(InvalidRequestException.class);
+  }
+
+  @Test
+  void shouldRejectUnsupportedActionTypeFilter() {
+    assertThatThrownBy(() -> actionService.listActions(null, "DISCOUNT", null))
+        .isInstanceOf(InvalidRequestException.class);
   }
 
   @Test

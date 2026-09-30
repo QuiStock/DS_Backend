@@ -32,7 +32,9 @@ public class ActionController {
   public ResponseEntity<GenerateActionsResponse> generateActions(
       @Valid @RequestBody GenerateActionsRequest request) {
     return ResponseEntity.status(HttpStatus.CREATED)
-        .body(actionService.generateActions(request.flowId()));
+        .body(
+            actionService.generateActions(
+                request.flowId(), request.promotionValidFrom(), request.promotionValidUntil()));
   }
 
   @GetMapping
@@ -45,7 +47,7 @@ public class ActionController {
 
   @PatchMapping("/{id}/status")
   public ActionStatusResponse updateActionStatus(
-      @PathVariable String id, @Valid @RequestBody UpdateActionStatusRequest request) {
-    return actionService.updateActionStatus(id, request.status());
+      @PathVariable("id") String id, @Valid @RequestBody UpdateActionStatusRequest request) {
+    return actionService.updateActionStatus(id, request);
   }
 }
