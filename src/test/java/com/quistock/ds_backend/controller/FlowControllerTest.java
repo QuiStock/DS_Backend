@@ -57,8 +57,7 @@ class FlowControllerTest {
                 .content("{}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
-        .andExpect(
-            jsonPath("$.message").value("Required fields are missing or invalid."));
+        .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   @Test
@@ -73,8 +72,7 @@ class FlowControllerTest {
                 .content("{\"product_id\":"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
-        .andExpect(
-            jsonPath("$.message").value("Required fields are missing or invalid."));
+        .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   @Test
@@ -103,14 +101,10 @@ class FlowControllerTest {
     when(flowService.listFlows("URGENT", null, null)).thenThrow(new InvalidRequestException());
 
     mockMvc(flowService)
-        .perform(
-            get("/api/flows")
-                .contextPath("/api")
-                .queryParam("flow_type", "URGENT"))
+        .perform(get("/api/flows").contextPath("/api").queryParam("flow_type", "URGENT"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
-        .andExpect(
-            jsonPath("$.message").value("Required fields are missing or invalid."));
+        .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   @Test
@@ -119,14 +113,10 @@ class FlowControllerTest {
     when(flowService.listFlows(null, null, "PENDING")).thenThrow(new InvalidRequestException());
 
     mockMvc(flowService)
-        .perform(
-            get("/api/flows")
-                .contextPath("/api")
-                .queryParam("status", "PENDING"))
+        .perform(get("/api/flows").contextPath("/api").queryParam("status", "PENDING"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
-        .andExpect(
-            jsonPath("$.message").value("Required fields are missing or invalid."));
+        .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   @Test

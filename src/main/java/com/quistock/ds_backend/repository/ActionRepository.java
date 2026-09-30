@@ -1,7 +1,5 @@
 package com.quistock.ds_backend.repository;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quistock.ds_backend.exception.ActionNotFoundException;
 import com.quistock.ds_backend.model.dto.ActionDTO;
 import com.quistock.ds_backend.model.dto.ActionListItemDTO;
@@ -18,6 +16,8 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 @Repository
 public class ActionRepository {
@@ -63,7 +63,9 @@ public class ActionRepository {
                    CAST(:origin AS suggestion_origin),
                    CAST(:status AS suggestion_status),
                    :promotionValidFrom, :promotionValidUntil,
-                   ps.sale_price, NULL, TRUE
+                   CASE WHEN CAST(:actionType AS suggestion_type) = 'PROMOTION'
+                     THEN ps.sale_price ELSE NULL END,
+                   NULL, TRUE
             FROM product_analysis pa
             JOIN product_store ps
               ON ps.product_id = pa.product_id AND ps.store_id = pa.store_id
@@ -74,10 +76,7 @@ public class ActionRepository {
             parameters,
             (resultSet, rowNumber) -> resultSet.getLong("id"));
 
-    Long suggestionId =
-        insertedIds.isEmpty()
-            ? findSuggestionIdByFlow(flowId)
-            : insertedIds.get(0);
+    Long suggestionId = insertedIds.isEmpty() ? findSuggestionIdByFlow(flowId) : insertedIds.get(0);
     if (suggestionId == null) {
       throw new IllegalArgumentException("The analyzed flow has no persisted product snapshot.");
     }
@@ -382,7 +381,7 @@ public class ActionRepository {
   private String toJson(Object value) {
     try {
       return objectMapper.writeValueAsString(value);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Could not serialize suggestion history JSON.", exception);
     }
   }

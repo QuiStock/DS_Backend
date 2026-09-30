@@ -19,10 +19,10 @@ import java.util.Objects;
 import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
@@ -88,7 +88,9 @@ public class ProductService {
   public ProductDTO findProductById(String id) {
     if (productRepository != null) {
       synchronizeIfNeeded();
-      return productRepository.findByPublicId(id).orElseThrow(() -> new ProductNotFoundException(id));
+      return productRepository
+          .findByPublicId(id)
+          .orElseThrow(() -> new ProductNotFoundException(id));
     }
     return listProducts(null, null, null).stream()
         .filter(product -> product.id().equals(id))
@@ -131,7 +133,8 @@ public class ProductService {
         firstBatch.category(),
         preserveWholeQuantity(currentStock),
         preserveWholeQuantity(
-            resolveDecimalConfiguration(productBatches, ErpBatchDTO::minimumStock, "minimum_stock", key)),
+            resolveDecimalConfiguration(
+                productBatches, ErpBatchDTO::minimumStock, "minimum_stock", key)),
         preserveWholeQuantity(sales7d),
         preserveWholeQuantity(sales30d),
         calculateExpirationDays(productBatches),

@@ -124,8 +124,7 @@ class ProductControllerTest {
         .perform(get("/api/products").contextPath("/api").queryParam("status", "active"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
-        .andExpect(
-            jsonPath("$.message").value("Required fields are missing or invalid."));
+        .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   private MockMvc createMockMvc(ProductService productService) {

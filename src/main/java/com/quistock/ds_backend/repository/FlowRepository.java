@@ -1,7 +1,5 @@
 package com.quistock.ds_backend.repository;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -13,6 +11,8 @@ import java.util.Optional;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 @Repository
 public class FlowRepository {
@@ -57,8 +57,7 @@ public class FlowRepository {
     metrics.put("sales_30d", analysis.sales30d());
     metrics.put("expiration_days", analysis.expirationDays());
     metrics.put("supplier_lead_time", analysis.supplierLeadTime());
-    Map<String, Object> context =
-        Map.of("reason", analysis.reason(), "classifier", "RULE_ENGINE");
+    Map<String, Object> context = Map.of("reason", analysis.reason(), "classifier", "RULE_ENGINE");
 
     MapSqlParameterSource parameters =
         new MapSqlParameterSource()
@@ -106,7 +105,7 @@ public class FlowRepository {
 
     String sql =
         FLOW_SELECT
-        + " WHERE (CAST(:flowType AS text) IS NULL OR ft.code = CAST(:flowType AS flow_type))"
+            + " WHERE (CAST(:flowType AS text) IS NULL OR ft.code = CAST(:flowType AS flow_type))"
             + " AND (CAST(:productErpId AS text) IS NULL OR (p.erp_id = :productErpId AND s.erp_id = :storeErpId))"
             + " ORDER BY pa.created_at DESC, pa.id DESC";
     if (status != null && !"ANALYZED".equals(status)) {
@@ -147,7 +146,7 @@ public class FlowRepository {
   private String toJson(Object value) {
     try {
       return objectMapper.writeValueAsString(value);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("Could not serialize analysis JSON.", exception);
     }
   }

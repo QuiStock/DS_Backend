@@ -40,10 +40,10 @@ class DashboardServiceTest {
     when(actionService.listActions())
         .thenReturn(
             List.of(
-                action("501", "101", "PROMOTION", "SUGGESTED"),
-                action("502", "102", "STOCK_ORDER", "SUGGESTED"),
+                action("501", "101", "PROMOTION", "GENERATED"),
+                action("502", "102", "ORDER", "GENERATED"),
                 action("503", "103", "PROMOTION", "APPROVED"),
-                action("504", "104", "MONITOR", "SUGGESTED")));
+                action("504", "104", "PROMOTION", "GENERATED")));
     when(productService.listProducts(null, null, null))
         .thenReturn(List.of(product(10, 5, 10), product(0, 5, null), product(3, 5, 30)));
 
@@ -54,7 +54,7 @@ class DashboardServiceTest {
     assertThat(summary.mediumRiskProducts()).isEqualTo(1);
     assertThat(summary.lowRiskProducts()).isEqualTo(2);
     assertThat(summary.suggestedActions()).isEqualTo(3);
-    assertThat(summary.suggestedPromotions()).isEqualTo(1);
+    assertThat(summary.suggestedPromotions()).isEqualTo(2);
     assertThat(summary.suggestedStockOrders()).isEqualTo(1);
     assertThat(summary.nearExpiryProducts()).isEqualTo(2);
     assertThat(summary.stockoutProducts()).isEqualTo(1);

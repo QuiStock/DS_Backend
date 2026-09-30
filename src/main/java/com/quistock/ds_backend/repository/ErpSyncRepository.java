@@ -54,8 +54,9 @@ public class ErpSyncRepository {
     jdbc.getJdbcTemplate().execute("SELECT pg_advisory_xact_lock(74192001)");
     int activeProductCount =
         jdbc.getJdbcTemplate()
-            .queryForObject("SELECT COUNT(*) FROM product_store WHERE active = TRUE", Integer.class);
-    if (batches.isEmpty() && activeProductCount != null && activeProductCount > 0) {
+            .queryForObject(
+                "SELECT COUNT(*) FROM product_store WHERE active = TRUE", Integer.class);
+    if (batches.isEmpty() && activeProductCount > 0) {
       throw new IllegalStateException(
           "The ERP returned an empty product snapshot; the existing catalog was preserved.");
     }
@@ -64,8 +65,9 @@ public class ErpSyncRepository {
         batches.stream()
             .collect(
                 Collectors.groupingBy(
-                    batch -> new ProductStoreKey(required(batch.erpProductCode(), "product code"),
-                        required(batch.erpBranchCode(), "store code")),
+                    batch ->
+                        new ProductStoreKey(
+                            required(batch.erpProductCode(), "product code"), storeErpId(batch)),
                     LinkedHashMap::new,
                     Collectors.toList()));
 
@@ -81,8 +83,9 @@ public class ErpSyncRepository {
       List<ErpBatchDTO> productBatches = entry.getValue();
       ErpBatchDTO firstBatch = productBatches.get(0);
       String storeName = required(firstBatch.branch(), "store name");
-      Long storeId = storeIds.computeIfAbsent(
-          key.storeErpId(), ignored -> upsertStore(key.storeErpId(), storeName, syncId));
+      Long storeId =
+          storeIds.computeIfAbsent(
+              key.storeErpId(), ignored -> upsertStore(key.storeErpId(), storeName, syncId));
       seenStores.add(key.storeErpId());
 
       String categoryName = clean(firstBatch.category());
@@ -396,7 +399,8 @@ public class ErpSyncRepository {
     return Boolean.TRUE.equals(exists);
   }
 
-  private BigDecimal sum(List<ErpBatchDTO> batches, java.util.function.Function<ErpBatchDTO, Object> field) {
+  private BigDecimal sum(
+      List<ErpBatchDTO> batches, java.util.function.Function<ErpBatchDTO, Object> field) {
     return batches.stream()
         .map(field)
         .map(ErpValueParser::toBigDecimal)
@@ -445,7 +449,8 @@ public class ErpSyncRepository {
     }
     String value = key.productErpId() + ":" + key.storeErpId() + ":" + sourceId;
     if (value.length() > 150) {
-      throw new IllegalArgumentException("The composite ERP batch identifier exceeds 150 characters.");
+      throw new IllegalArgumentException(
+          "The composite ERP batch identifier exceeds 150 characters.");
     }
     return value;
   }
@@ -466,6 +471,13 @@ public class ErpSyncRepository {
     return cleaned;
   }
 
+  private String storeErpId(ErpBatchDTO batch) {
+    String erpBranchCode = clean(batch.erpBranchCode());
+    return erpBranchCode == null
+        ? required(batch.branch(), "store code or branch name")
+        : erpBranchCode;
+  }
+
   private String clean(String value) {
     return value == null || value.isBlank() ? null : value.trim();
   }
@@ -481,7 +493,8 @@ public class ErpSyncRepository {
     return value.substring(0, maxLength);
   }
 
-  public record SyncResult(int recordsRead, int recordsInserted, int recordsUpdated, int recordsDeactivated) {}
+  public record SyncResult(
+      int recordsRead, int recordsInserted, int recordsUpdated, int recordsDeactivated) {}
 
   private record ProductStoreSnapshot(
       long productId,
