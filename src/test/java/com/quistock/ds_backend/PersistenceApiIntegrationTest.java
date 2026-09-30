@@ -58,6 +58,7 @@ class PersistenceApiIntegrationTest {
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("spring.datasource.driver-class-name", POSTGRES::getDriverClassName);
     registry.add("spring.flyway.enabled", () -> true);
+    registry.add("server.servlet.context-path", () -> "/api");
     registry.add("erp.sync.enabled", () -> true);
     registry.add("erp.sync.initial-delay-ms", () -> 3_600_000);
     registry.add("erp.api.base-url", () -> "http://127.0.0.1:" + erpServer.getAddress().getPort());
@@ -178,7 +179,9 @@ class PersistenceApiIntegrationTest {
     }
     HttpResponse<String> response =
         http.send(request.build(), HttpResponse.BodyHandlers.ofString());
-    assertThat(response.statusCode()).isEqualTo(expectedStatus);
+    assertThat(response.statusCode())
+        .as("%s %s returned %s", method, path, response.body())
+        .isEqualTo(expectedStatus);
     return objectMapper.readTree(response.body());
   }
 
