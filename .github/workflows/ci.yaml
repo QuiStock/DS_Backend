@@ -129,3 +129,24 @@ jobs:
           path: build/reports/jacoco/jacocoAggregateReport
           if-no-files-found: warn
           retention-days: 7
+
+  container-image:
+    name: Container image (ARM64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build ARM64 image without publishing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/arm64
+          push: false
