@@ -58,8 +58,7 @@ class ChatControllerTest {
                 .content("{\"user_id\":\"1\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
-        .andExpect(
-            jsonPath("$.message").value("Required fields are missing or invalid."));
+        .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   @Test
@@ -74,8 +73,7 @@ class ChatControllerTest {
                 .content("{\"message\":\"Which products need a promotion?\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
-        .andExpect(
-            jsonPath("$.message").value("Required fields are missing or invalid."));
+        .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   private MockMvc mockMvc(ChatService chatService) {

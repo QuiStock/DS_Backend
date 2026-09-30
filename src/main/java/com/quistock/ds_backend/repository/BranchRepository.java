@@ -42,8 +42,8 @@ public class BranchRepository {
   private String joinAddress(String street, String number, String complement) {
     String address =
         java.util.stream.Stream.of(street, number, complement)
-        .filter(value -> value != null && !value.isBlank())
-        .collect(java.util.stream.Collectors.joining(", "));
+            .filter(value -> value != null && !value.isBlank())
+            .collect(java.util.stream.Collectors.joining(", "));
     return address.isEmpty() ? null : address;
   }
 }

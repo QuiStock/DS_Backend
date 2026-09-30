@@ -91,8 +91,10 @@ public class ProductRepository {
   }
 
   public boolean hasSnapshot() {
-    Integer count = jdbc.getJdbcTemplate().queryForObject(
-        "SELECT COUNT(*) FROM product_store WHERE active = TRUE", Integer.class);
+    Integer count =
+        jdbc.getJdbcTemplate()
+            .queryForObject(
+                "SELECT COUNT(*) FROM product_store WHERE active = TRUE", Integer.class);
     return count != null && count > 0;
   }
 

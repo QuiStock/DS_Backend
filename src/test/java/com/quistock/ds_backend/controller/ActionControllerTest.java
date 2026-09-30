@@ -18,6 +18,7 @@ import com.quistock.ds_backend.model.dto.ActionDTO;
 import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.ActionStatusResponse;
 import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
+import com.quistock.ds_backend.model.dto.UpdateActionStatusRequest;
 import com.quistock.ds_backend.service.ActionService;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -32,8 +33,8 @@ class ActionControllerTest {
     ActionService actionService = mock(ActionService.class);
     ActionDTO action =
         new ActionDTO(
-            "501", "PROMOTION", "SUGGESTED", "Product has expiration or excess stock risk.");
-    when(actionService.generateActions("101"))
+            "501", "PROMOTION", "GENERATED", "Product has expiration or excess stock risk.");
+    when(actionService.generateActions("101", null, null))
         .thenReturn(new GenerateActionsResponse("101", List.of(action)));
 
     mockMvc(actionService)
@@ -47,7 +48,7 @@ class ActionControllerTest {
         .andExpect(jsonPath("$.flow_id").value("101"))
         .andExpect(jsonPath("$.generated_actions[0].id").value("501"))
         .andExpect(jsonPath("$.generated_actions[0].action_type").value("PROMOTION"))
-        .andExpect(jsonPath("$.generated_actions[0].status").value("SUGGESTED"));
+        .andExpect(jsonPath("$.generated_actions[0].status").value("GENERATED"));
   }
 
   @Test
@@ -62,14 +63,14 @@ class ActionControllerTest {
                 .content("{}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
-        .andExpect(
-            jsonPath("$.message").value("Required fields are missing or invalid."));
+        .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   @Test
   void shouldReturn404WhenFlowIsNotFound() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.generateActions("UNKNOWN")).thenThrow(new FlowNotFoundException("UNKNOWN"));
+    when(actionService.generateActions("UNKNOWN", null, null))
+        .thenThrow(new FlowNotFoundException("UNKNOWN"));
 
     mockMvc(actionService)
         .perform(
@@ -90,15 +91,15 @@ class ActionControllerTest {
             "101",
             "Whole Milk 1L",
             "PROMOTION",
-            "SUGGESTED",
+            "GENERATED",
             "Product has expiration or excess stock risk.");
-    when(actionService.listActions("SUGGESTED", "PROMOTION", "101")).thenReturn(List.of(action));
+    when(actionService.listActions("GENERATED", "PROMOTION", "101")).thenReturn(List.of(action));
 
     mockMvc(actionService)
         .perform(
             get("/api/actions")
                 .contextPath("/api")
-                .queryParam("status", "SUGGESTED")
+                .queryParam("status", "GENERATED")
                 .queryParam("action_type", "PROMOTION")
                 .queryParam("flow_id", "101"))
         .andExpect(status().isOk())
@@ -107,7 +108,7 @@ class ActionControllerTest {
         .andExpect(jsonPath("$[0].flow_id").value("101"))
         .andExpect(jsonPath("$[0].product_name").value("Whole Milk 1L"))
         .andExpect(jsonPath("$[0].action_type").value("PROMOTION"))
-        .andExpect(jsonPath("$[0].status").value("SUGGESTED"));
+        .andExpect(jsonPath("$[0].status").value("GENERATED"));
   }
 
   @Test
@@ -117,37 +118,28 @@ class ActionControllerTest {
         .thenThrow(new InvalidRequestException());
 
     mockMvc(actionService)
-        .perform(
-            get("/api/actions")
-                .contextPath("/api")
-                .queryParam("action_type", "DISCOUNT"))
+        .perform(get("/api/actions").contextPath("/api").queryParam("action_type", "DISCOUNT"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
-        .andExpect(
-            jsonPath("$.message").value("Required fields are missing or invalid."));
+        .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   @Test
   void shouldReturn400ForUnsupportedActionStatusFilter() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.listActions("ACTIVE", null, null))
-        .thenThrow(new InvalidRequestException());
+    when(actionService.listActions("ACTIVE", null, null)).thenThrow(new InvalidRequestException());
 
     mockMvc(actionService)
-        .perform(
-            get("/api/actions")
-                .contextPath("/api")
-                .queryParam("status", "ACTIVE"))
+        .perform(get("/api/actions").contextPath("/api").queryParam("status", "ACTIVE"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
-        .andExpect(
-            jsonPath("$.message").value("Required fields are missing or invalid."));
+        .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   @Test
   void shouldUpdateActionStatusOnPublicRoute() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.updateActionStatus("501", "APPROVED"))
+    when(actionService.updateActionStatus("501", new UpdateActionStatusRequest("APPROVED")))
         .thenReturn(new ActionStatusResponse("501", "APPROVED"));
 
     mockMvc(actionService)
@@ -165,7 +157,7 @@ class ActionControllerTest {
   @Test
   void shouldReturn404WhenActionIsNotFound() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.updateActionStatus("UNKNOWN", "APPROVED"))
+    when(actionService.updateActionStatus("UNKNOWN", new UpdateActionStatusRequest("APPROVED")))
         .thenThrow(new ActionNotFoundException("UNKNOWN"));
 
     mockMvc(actionService)
@@ -181,7 +173,7 @@ class ActionControllerTest {
   @Test
   void shouldReturn400ForUnsupportedActionStatus() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.updateActionStatus("501", "INVALID"))
+    when(actionService.updateActionStatus("501", new UpdateActionStatusRequest("INVALID")))
         .thenThrow(new InvalidActionStatusException("INVALID"));
 
     mockMvc(actionService)
@@ -192,8 +184,7 @@ class ActionControllerTest {
                 .content("{\"status\":\"INVALID\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
-        .andExpect(
-            jsonPath("$.message").value("Required fields are missing or invalid."));
+        .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   @Test
@@ -208,8 +199,7 @@ class ActionControllerTest {
                 .content("{\"status\":\" \"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
-        .andExpect(
-            jsonPath("$.message").value("Required fields are missing or invalid."));
+        .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   private MockMvc mockMvc(ActionService actionService) {

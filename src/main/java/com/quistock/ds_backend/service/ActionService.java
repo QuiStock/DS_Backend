@@ -161,9 +161,13 @@ public class ActionService {
             "REJECTED".equals(status) ? request.justification() : stored.decisionJustification();
         actions.set(
             index,
-            new StoredAction(stored.flowId(), stored.productName(), updated, decisionJustification));
+            new StoredAction(
+                stored.flowId(), stored.productName(), updated, decisionJustification));
         return new ActionStatusResponse(
-            updated.id(), updated.status(), updated.promotionValidFrom(), updated.promotionValidUntil());
+            updated.id(),
+            updated.status(),
+            updated.promotionValidFrom(),
+            updated.promotionValidUntil());
       }
     }
     throw new ActionNotFoundException(actionId);
@@ -231,10 +235,7 @@ public class ActionService {
     }
     if (hasFinalValidity) {
       validatePromotionDates(
-          actionType,
-          request.finalPromotionValidFrom(),
-          request.finalPromotionValidUntil(),
-          true);
+          actionType, request.finalPromotionValidFrom(), request.finalPromotionValidUntil(), true);
     }
   }
 

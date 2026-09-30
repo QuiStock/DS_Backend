@@ -8,7 +8,8 @@ import org.springframework.web.client.RestClient;
 @SpringBootTest
 class DsBackendApplicationTests {
 
-  @MockitoBean(name = "erpRestClient") RestClient erpRestClient;
+  @MockitoBean(name = "erpRestClient")
+  RestClient erpRestClient;
 
   @Test
   void contextLoads() {}
