@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.dao.DataAccessException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -42,7 +43,7 @@ public class ErpSyncService {
   public void synchronizeOnSchedule() {
     try {
       syncNow();
-    } catch (RuntimeException exception) {
+    } catch (ErpIntegrationException | DataAccessException | IllegalStateException exception) {
       LOGGER.error("Scheduled ERP synchronization failed.", exception);
     }
   }
@@ -62,7 +63,7 @@ public class ErpSyncService {
     } catch (RestClientException | IllegalArgumentException exception) {
       markFailed(syncId, exception);
       throw new ErpIntegrationException("Could not synchronize the external ERP data.", exception);
-    } catch (RuntimeException exception) {
+    } catch (DataAccessException | IllegalStateException exception) {
       markFailed(syncId, exception);
       throw exception;
     } finally {
@@ -80,7 +81,7 @@ public class ErpSyncService {
     }
     try {
       syncRepository.failSync(syncId, exception.getMessage());
-    } catch (RuntimeException statusException) {
+    } catch (DataAccessException statusException) {
       exception.addSuppressed(statusException);
       LOGGER.error("Could not record the failed ERP synchronization status.", statusException);
     }

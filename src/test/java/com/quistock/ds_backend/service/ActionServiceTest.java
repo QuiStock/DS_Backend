@@ -14,6 +14,8 @@ import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.ActionStatusResponse;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
+import com.quistock.ds_backend.model.dto.UpdateActionStatusRequest;
+import com.quistock.ds_backend.repository.ActionRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -26,37 +28,53 @@ class ActionServiceTest {
   private static final LocalDate PROMOTION_END = LocalDate.of(2026, 10, 7);
 
   private FlowService flowService;
+  private ActionRepository actionRepository;
   private ActionService actionService;
 
   @BeforeEach
   void setUp() {
     flowService = mock(FlowService.class);
-    actionService = new ActionService(flowService);
+    actionRepository = mock(ActionRepository.class);
+    actionService = new ActionService(flowService, actionRepository);
   }
 
   @Test
   void shouldGeneratePromotionForLowFlow() {
-    when(flowService.findFlowById("101")).thenReturn(flow("101", "LOW"));
+    FlowDTO flow = flow("101", "LOW");
+    ActionDTO action = action("501", "PROMOTION", "GENERATED");
+    when(flowService.findFlowById("101")).thenReturn(flow);
+    when(actionRepository.createGenerated(
+            flow,
+            "PROMOTION",
+            "Expiration or excess-stock risk: create a promotion.",
+            PROMOTION_START,
+            PROMOTION_END))
+        .thenReturn(action);
 
     GenerateActionsResponse response =
         actionService.generateActions("101", PROMOTION_START, PROMOTION_END);
 
     assertThat(response.flowId()).isEqualTo("101");
-    assertThat(response.generatedActions()).singleElement().satisfies(this::assertPromotion);
+    assertThat(response.generatedActions()).containsExactly(action);
   }
 
   @Test
   void shouldGenerateStockOrderForHighFlow() {
-    when(flowService.findFlowById("101")).thenReturn(flow("101", "HIGH"));
+    FlowDTO flow = flow("101", "HIGH");
+    ActionDTO action = action("501", "ORDER", "GENERATED");
+    when(flowService.findFlowById("101")).thenReturn(flow);
+    when(actionRepository.createGenerated(
+            flow, "ORDER", "Stockout risk: replenish stock.", null, null))
+        .thenReturn(action);
 
-    ActionDTO action = actionService.generateActions("101").generatedActions().get(0);
+    ActionDTO generated = actionService.generateActions("101").generatedActions().get(0);
 
-    assertThat(action.actionType()).isEqualTo("ORDER");
-    assertThat(action.status()).isEqualTo("GENERATED");
+    assertThat(generated.actionType()).isEqualTo("ORDER");
+    assertThat(generated.status()).isEqualTo("GENERATED");
   }
 
   @Test
-  void shouldGenerateMonitorForMediumFlow() {
+  void shouldGenerateNoActionForMediumFlow() {
     when(flowService.findFlowById("101")).thenReturn(flow("101", "MEDIUM"));
 
     assertThat(actionService.generateActions("101").generatedActions()).isEmpty();
@@ -71,27 +89,29 @@ class ActionServiceTest {
   }
 
   @Test
+  void shouldRejectPromotionDatesForNonPromotionFlow() {
+    when(flowService.findFlowById("101")).thenReturn(flow("101", "HIGH"));
+
+    assertThatThrownBy(() -> actionService.generateActions("101", PROMOTION_START, PROMOTION_END))
+        .isInstanceOf(InvalidRequestException.class);
+  }
+
+  @Test
   void shouldListActionsUsingContractFilters() {
-    when(flowService.findFlowById("101")).thenReturn(flow("101", "LOW"));
-    when(flowService.findFlowById("102")).thenReturn(flow("102", "HIGH"));
+    ActionListItemDTO action =
+        new ActionListItemDTO(
+            "501",
+            "101",
+            "Whole Milk 1L",
+            "PROMOTION",
+            "GENERATED",
+            "Expiration or excess-stock risk: create a promotion.",
+            PROMOTION_START,
+            PROMOTION_END,
+            null);
+    when(actionRepository.findAll("GENERATED", "PROMOTION", "101")).thenReturn(List.of(action));
 
-    actionService.generateActions("101", PROMOTION_START, PROMOTION_END);
-    actionService.generateActions("102");
-
-    assertThat(actionService.listActions()).hasSize(2);
-
-    List<ActionListItemDTO> actions = actionService.listActions("GENERATED", "PROMOTION", "101");
-
-    assertThat(actions)
-        .singleElement()
-        .satisfies(
-            action -> {
-              assertThat(action.id()).isEqualTo("501");
-              assertThat(action.flowId()).isEqualTo("101");
-              assertThat(action.productName()).isEqualTo("Whole Milk 1L");
-              assertThat(action.actionType()).isEqualTo("PROMOTION");
-              assertThat(action.status()).isEqualTo("GENERATED");
-            });
+    assertThat(actionService.listActions("GENERATED", "PROMOTION", "101")).containsExactly(action);
   }
 
   @Test
@@ -108,26 +128,39 @@ class ActionServiceTest {
 
   @Test
   void shouldUpdateActionStatus() {
-    when(flowService.findFlowById("101")).thenReturn(flow("101", "LOW"));
-    actionService.generateActions("101", PROMOTION_START, PROMOTION_END);
+    UpdateActionStatusRequest request = new UpdateActionStatusRequest("APPROVED");
+    when(actionRepository.findTypeById("501")).thenReturn("PROMOTION");
+    when(actionRepository.updateStatus("501", request))
+        .thenReturn(new ActionStatusResponse("501", "APPROVED"));
 
-    ActionStatusResponse response = actionService.updateActionStatus("501", "APPROVED");
+    ActionStatusResponse response = actionService.updateActionStatus("501", request);
 
     assertThat(response.id()).isEqualTo("501");
     assertThat(response.status()).isEqualTo("APPROVED");
-    assertThat(actionService.listActions("APPROVED", null, "101"))
-        .singleElement()
-        .extracting(ActionListItemDTO::status)
-        .isEqualTo("APPROVED");
+  }
+
+  @Test
+  void shouldRejectFinalPromotionDatesForNonPromotionActions() {
+    UpdateActionStatusRequest request =
+        new UpdateActionStatusRequest("APPROVED", null, PROMOTION_START, PROMOTION_END);
+    when(actionRepository.findTypeById("501")).thenReturn("ORDER");
+
+    assertThatThrownBy(() -> actionService.updateActionStatus("501", request))
+        .isInstanceOf(InvalidRequestException.class);
   }
 
   @Test
   void shouldRejectUnsupportedActionStatus() {
-    when(flowService.findFlowById("101")).thenReturn(flow("101", "LOW"));
-    actionService.generateActions("101", PROMOTION_START, PROMOTION_END);
-
     assertThatThrownBy(() -> actionService.updateActionStatus("501", "INVALID"))
         .isInstanceOf(InvalidActionStatusException.class);
+  }
+
+  @Test
+  void shouldRequireJustificationWhenRejectingAction() {
+    UpdateActionStatusRequest request = new UpdateActionStatusRequest("REJECTED", " ", null, null);
+
+    assertThatThrownBy(() -> actionService.updateActionStatus("501", request))
+        .isInstanceOf(InvalidRequestException.class);
   }
 
   @Test
@@ -136,12 +169,8 @@ class ActionServiceTest {
         .isInstanceOf(ActionNotFoundException.class);
   }
 
-  private void assertPromotion(ActionDTO action) {
-    assertThat(action.id()).isEqualTo("501");
-    assertThat(action.actionType()).isEqualTo("PROMOTION");
-    assertThat(action.status()).isEqualTo("GENERATED");
-    assertThat(action.justification())
-        .isEqualTo("Expiration or excess-stock risk: create a promotion.");
+  private ActionDTO action(String id, String type, String status) {
+    return new ActionDTO(id, type, status, "Action reason", PROMOTION_START, PROMOTION_END);
   }
 
   private FlowDTO flow(String id, String type) {
