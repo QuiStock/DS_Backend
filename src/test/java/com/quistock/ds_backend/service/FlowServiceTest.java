@@ -2,16 +2,21 @@ package com.quistock.ds_backend.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.quistock.ds_backend.exception.InvalidRequestException;
+import com.quistock.ds_backend.exception.ProductNotFoundException;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.ProductDTO;
+import com.quistock.ds_backend.repository.FlowRepository;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -20,16 +25,20 @@ class FlowServiceTest {
       Clock.fixed(Instant.parse("2026-08-28T12:00:00Z"), ZoneOffset.UTC);
 
   private ProductService productService;
+  private FlowRepository flowRepository;
   private FlowService flowService;
 
   @BeforeEach
   void setUp() {
     productService = mock(ProductService.class);
-    flowService = new FlowService(productService, TEST_CLOCK);
+    flowRepository = mock(FlowRepository.class);
+    flowService =
+        new FlowService(productService, flowRepository, new FlowAnalysisCalculator(), TEST_CLOCK);
+    when(flowRepository.insertAnalysis(any())).thenReturn(101L);
   }
 
   @Test
-  void shouldClassifyProductCloseToExpirationAsLow() {
+  void shouldClassifyProductCloseToExpirationAsLowAndPersistItsAnalysis() {
     ProductDTO product = product(51, 58, 36, 150, 0, 3);
     when(productService.findProductById(product.id())).thenReturn(product);
 
@@ -42,6 +51,21 @@ class FlowServiceTest {
     assertThat(flow.dailySalesAverage()).isEqualByComparingTo("5.14");
     assertThat(flow.stockCoverageDays()).isEqualByComparingTo("9.92");
     assertThat(flow.analysisDate()).isEqualTo(TEST_CLOCK.instant());
+    verify(flowRepository)
+        .insertAnalysis(
+            new FlowRepository.AnalysisSnapshot(
+                product.id(),
+                "LOW",
+                new BigDecimal("5.14"),
+                new BigDecimal("9.92"),
+                new BigDecimal("51"),
+                new BigDecimal("58"),
+                new BigDecimal("36"),
+                new BigDecimal("150"),
+                0,
+                3,
+                "Product is expired or close to expiration.",
+                TEST_CLOCK.instant()));
   }
 
   @Test
@@ -89,28 +113,27 @@ class FlowServiceTest {
   }
 
   @Test
-  void shouldListGeneratedFlows() {
+  void shouldReportMissingProductWhenTheSnapshotDoesNotContainIt() {
     ProductDTO product = product(100, 40, 14, 60, 30, 5);
     when(productService.findProductById(product.id())).thenReturn(product);
+    when(flowRepository.insertAnalysis(any())).thenReturn(-1L);
 
-    flowService.analyzeProduct(product.id());
-
-    assertThat(flowService.listFlows()).hasSize(1);
+    assertThatThrownBy(() -> flowService.analyzeProduct(product.id()))
+        .isInstanceOf(ProductNotFoundException.class);
   }
 
   @Test
-  void shouldFilterFlowsByTypeProductAndStatus() {
-    ProductDTO lowRiskProduct = product("PROD001:FIL001", 100, 40, 0, 0, null, 5);
-    ProductDTO highRiskProduct = product("PROD002:FIL002", 5, 40, 14, 60, 365, 5);
-    when(productService.findProductById(lowRiskProduct.id())).thenReturn(lowRiskProduct);
-    when(productService.findProductById(highRiskProduct.id())).thenReturn(highRiskProduct);
+  void shouldPassFlowFiltersToTheRepository() {
+    when(flowRepository.findAll("LOW", "PROD001:FIL001", "ANALYZED")).thenReturn(List.of(flow()));
 
-    flowService.analyzeProduct(lowRiskProduct.id());
-    flowService.analyzeProduct(highRiskProduct.id());
+    assertThat(flowService.listFlows("LOW", "PROD001:FIL001", "ANALYZED")).containsExactly(flow());
+  }
 
-    assertThat(flowService.listFlows("LOW", null, "ANALYZED")).hasSize(1);
-    assertThat(flowService.listFlows(null, highRiskProduct.id(), null)).hasSize(1);
-    assertThat(flowService.listFlows(null, null, "ANALYZED")).hasSize(2);
+  @Test
+  void shouldPassNoFiltersToTheRepository() {
+    when(flowRepository.findAll(null, null, null)).thenReturn(List.of(flow()));
+
+    assertThat(flowService.listFlows()).containsExactly(flow());
   }
 
   @Test
@@ -160,5 +183,20 @@ class FlowServiceTest {
         Instant.parse("2026-08-20T00:00:00Z"),
         true,
         "Santana Store");
+  }
+
+  private FlowDTO flow() {
+    return new FlowDTO(
+        "101",
+        "PROD001:FIL001",
+        "Whole Milk 1L",
+        "LOW",
+        "ANALYZED",
+        "analysis reason",
+        BigDecimal.ONE,
+        BigDecimal.TEN,
+        0,
+        3,
+        TEST_CLOCK.instant());
   }
 }

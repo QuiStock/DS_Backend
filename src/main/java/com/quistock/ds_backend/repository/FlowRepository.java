@@ -2,8 +2,9 @@ package com.quistock.ds_backend.repository;
 
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import java.math.BigDecimal;
-import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,7 +67,7 @@ public class FlowRepository {
             .addValue("flowType", analysis.flowType())
             .addValue("metrics", toJson(metrics))
             .addValue("context", toJson(context))
-            .addValue("createdAt", Timestamp.from(analysis.createdAt()));
+            .addValue("createdAt", OffsetDateTime.ofInstant(analysis.createdAt(), ZoneOffset.UTC));
 
     List<Long> ids =
         jdbc.query(
@@ -128,7 +129,7 @@ public class FlowRepository {
   }
 
   private FlowDTO toFlow(java.sql.ResultSet resultSet) throws java.sql.SQLException {
-    Timestamp analysisDate = resultSet.getTimestamp("analysis_date");
+    OffsetDateTime analysisDate = resultSet.getObject("analysis_date", OffsetDateTime.class);
     return new FlowDTO(
         resultSet.getString("id"),
         resultSet.getString("public_product_id"),

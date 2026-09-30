@@ -13,7 +13,9 @@
 
         <module name="AvoidStarImport"/>
 
-        <module name="HiddenField"/>
+        <module name="HiddenField">
+            <property name="ignoreConstructorParameter" value="true"/>
+        </module>
 
         <module name="ParameterNumber">
             <property name="max" value="6"/>
