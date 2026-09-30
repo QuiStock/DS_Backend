@@ -7,6 +7,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.quistock.ds_backend.exception.ErpIntegrationException;
+import com.quistock.ds_backend.handler.ApiExceptionHandler;
 import com.quistock.ds_backend.model.dto.DashboardSummaryDTO;
 import com.quistock.ds_backend.service.DashboardService;
 import org.junit.jupiter.api.Test;
@@ -39,7 +41,23 @@ class DashboardControllerTest {
         .andExpect(jsonPath("$.active_actions").value(5));
   }
 
+  @Test
+  void shouldReturn503WhenErpIsUnavailable() throws Exception {
+    DashboardService dashboardService = mock(DashboardService.class);
+    when(dashboardService.getSummary())
+        .thenThrow(
+            new ErpIntegrationException(
+                "Could not connect to the external ERP API.", new RuntimeException()));
+
+    mockMvc(dashboardService)
+        .perform(get("/api/dashboard/summary").contextPath("/api"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.error").value("ERP_UNAVAILABLE"));
+  }
+
   private MockMvc mockMvc(DashboardService dashboardService) {
-    return MockMvcBuilders.standaloneSetup(new DashboardController(dashboardService)).build();
+    return MockMvcBuilders.standaloneSetup(new DashboardController(dashboardService))
+        .setControllerAdvice(new ApiExceptionHandler())
+        .build();
   }
 }

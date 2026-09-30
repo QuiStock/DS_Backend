@@ -4,7 +4,9 @@ import com.quistock.ds_backend.exception.ErpIntegrationException;
 import com.quistock.ds_backend.exception.ProductNotFoundException;
 import com.quistock.ds_backend.model.dto.ErpBatchDTO;
 import com.quistock.ds_backend.model.dto.ProductDTO;
+import com.quistock.ds_backend.repository.ProductRepository;
 import com.quistock.ds_backend.util.ErpValueParser;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -17,6 +19,8 @@ import java.util.Objects;
 import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,7 +40,22 @@ public class ProductService {
   private final RestClient erpRestClient;
   private final String productsPath;
   private final Clock clock;
+  private final ProductRepository productRepository;
+  private final ErpSyncService erpSyncService;
 
+  @Autowired
+  public ProductService(
+      ProductRepository productRepository,
+      ObjectProvider<ErpSyncService> erpSyncServiceProvider,
+      Clock applicationClock) {
+    this.erpRestClient = null;
+    this.productsPath = null;
+    this.clock = applicationClock;
+    this.productRepository = productRepository;
+    this.erpSyncService = erpSyncServiceProvider.getIfAvailable();
+  }
+
+  // Kept for the existing service-level ERP tests; production uses the persisted projection.
   public ProductService(
       RestClient restClient,
       @Value("${erp.api.products-path:/products}") String path,
@@ -44,9 +63,16 @@ public class ProductService {
     this.erpRestClient = restClient;
     this.productsPath = path;
     this.clock = applicationClock;
+    this.productRepository = null;
+    this.erpSyncService = null;
   }
 
   public List<ProductDTO> listProducts(String branch, String category, Boolean status) {
+    if (productRepository != null) {
+      synchronizeIfNeeded();
+      return productRepository.findAll(branch, category, status);
+    }
+
     try {
       List<ErpBatchDTO> batches =
           erpRestClient.get().uri(productsPath).retrieve().body(BATCHES_TYPE);
@@ -60,6 +86,10 @@ public class ProductService {
   }
 
   public ProductDTO findProductById(String id) {
+    if (productRepository != null) {
+      synchronizeIfNeeded();
+      return productRepository.findByPublicId(id).orElseThrow(() -> new ProductNotFoundException(id));
+    }
     return listProducts(null, null, null).stream()
         .filter(product -> product.id().equals(id))
         .findFirst()
@@ -90,25 +120,26 @@ public class ProductService {
     ErpBatchDTO firstBatch = productBatches.get(0);
     ErpBatchDTO mostRecentBatch = findMostRecentBatch(productBatches);
 
-    int currentStock = sum(productBatches, ErpBatchDTO::quantity);
-    int sales7d = sum(productBatches, ErpBatchDTO::sales7d);
-    int sales30d = sum(productBatches, ErpBatchDTO::sales30d);
+    BigDecimal currentStock = sum(productBatches, ErpBatchDTO::quantity);
+    BigDecimal sales7d = sum(productBatches, ErpBatchDTO::sales7d);
+    BigDecimal sales30d = sum(productBatches, ErpBatchDTO::sales30d);
 
     return new ProductDTO(
         key.publicId(),
         key.erpProductCode(),
         firstBatch.productName(),
         firstBatch.category(),
-        currentStock,
-        resolveConfiguration(productBatches, ErpBatchDTO::minimumStock, "minimum_stock", key),
-        sales7d,
-        sales30d,
+        preserveWholeQuantity(currentStock),
+        preserveWholeQuantity(
+            resolveDecimalConfiguration(productBatches, ErpBatchDTO::minimumStock, "minimum_stock", key)),
+        preserveWholeQuantity(sales7d),
+        preserveWholeQuantity(sales30d),
         calculateExpirationDays(productBatches),
         resolveConfiguration(productBatches, ErpBatchDTO::leadTimeDays, "lead_time_days", key),
         ErpValueParser.toBigDecimal(mostRecentBatch.price()),
         ErpValueParser.toBigDecimal(mostRecentBatch.cost()),
         ErpValueParser.toInstant(mostRecentBatch.entryDate()),
-        currentStock > 0,
+        currentStock.signum() > 0,
         firstBatch.branch());
   }
 
@@ -116,8 +147,55 @@ public class ProductService {
     return new ProductBranchKey(batch.erpProductCode(), batch.erpBranchCode());
   }
 
-  private int sum(List<ErpBatchDTO> batches, Function<ErpBatchDTO, Object> field) {
-    return batches.stream().map(field).mapToInt(ErpValueParser::toIntegerOrZero).sum();
+  private BigDecimal sum(List<ErpBatchDTO> batches, Function<ErpBatchDTO, Object> field) {
+    return batches.stream()
+        .map(field)
+        .map(ErpValueParser::toBigDecimal)
+        .filter(Objects::nonNull)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
+  }
+
+  private void synchronizeIfNeeded() {
+    if (productRepository.hasSnapshot() || erpSyncService == null) {
+      return;
+    }
+    if (!erpSyncService.hasCompletedSync()) {
+      erpSyncService.syncNow();
+    }
+  }
+
+  private BigDecimal resolveDecimalConfiguration(
+      List<ErpBatchDTO> batches,
+      Function<ErpBatchDTO, Object> field,
+      String fieldName,
+      ProductBranchKey key) {
+    NavigableSet<BigDecimal> values =
+        batches.stream()
+            .map(field)
+            .map(ErpValueParser::toBigDecimal)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toCollection(TreeSet::new));
+
+    if (values.size() > MAX_VALUES_WITHOUT_DIVERGENCE && LOGGER.isWarnEnabled()) {
+      LOGGER.warn(
+          "Divergent values for {} in group {}:{}; using the highest value: {}",
+          fieldName,
+          key.erpProductCode(),
+          key.erpBranchCode(),
+          values.last());
+    }
+    return values.isEmpty() ? null : values.last();
+  }
+
+  private Number preserveWholeQuantity(BigDecimal value) {
+    if (value == null) {
+      return null;
+    }
+    try {
+      return value.intValueExact();
+    } catch (ArithmeticException exception) {
+      return value;
+    }
   }
 
   private Integer resolveConfiguration(
@@ -147,7 +225,11 @@ public class ProductService {
   private Integer calculateExpirationDays(List<ErpBatchDTO> batches) {
     LocalDate nearestExpirationDate =
         batches.stream()
-            .filter(batch -> ErpValueParser.toIntegerOrZero(batch.quantity()) > 0)
+            .filter(
+                batch -> {
+                  BigDecimal quantity = ErpValueParser.toBigDecimal(batch.quantity());
+                  return quantity != null && quantity.signum() > 0;
+                })
             .map(batch -> ErpValueParser.toLocalDate(batch.expirationDate()))
             .filter(Objects::nonNull)
             .min(Comparator.naturalOrder())
@@ -163,7 +245,7 @@ public class ProductService {
   private ErpBatchDTO findMostRecentBatch(List<ErpBatchDTO> batches) {
     Comparator<ErpBatchDTO> comparator =
         Comparator.comparing(
-                (ErpBatchDTO batch) -> ErpValueParser.toLocalDate(batch.entryDate()),
+                (ErpBatchDTO batch) -> ErpValueParser.toInstant(batch.entryDate()),
                 Comparator.nullsFirst(Comparator.naturalOrder()))
             .thenComparing(batch -> Objects.toString(batch.id(), ""));
 

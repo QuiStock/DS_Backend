@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.quistock.ds_backend.handler.ApiExceptionHandler;
 import com.quistock.ds_backend.model.dto.ChatReferencedDataDTO;
 import com.quistock.ds_backend.model.dto.ChatResponse;
 import com.quistock.ds_backend.service.ChatService;
@@ -45,7 +46,41 @@ class ChatControllerTest {
         .andExpect(jsonPath("$.referenced_data[0].suggested_action").value("PROMOTION"));
   }
 
+  @Test
+  void shouldReturnContractErrorWhenMessageIsMissing() throws Exception {
+    ChatService chatService = mock(ChatService.class);
+
+    mockMvc(chatService)
+        .perform(
+            post("/api/chat")
+                .contextPath("/api")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"user_id\":\"1\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
+        .andExpect(
+            jsonPath("$.message").value("Required fields are missing or invalid."));
+  }
+
+  @Test
+  void shouldReturnContractErrorWhenUserIdIsMissing() throws Exception {
+    ChatService chatService = mock(ChatService.class);
+
+    mockMvc(chatService)
+        .perform(
+            post("/api/chat")
+                .contextPath("/api")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"message\":\"Which products need a promotion?\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
+        .andExpect(
+            jsonPath("$.message").value("Required fields are missing or invalid."));
+  }
+
   private MockMvc mockMvc(ChatService chatService) {
-    return MockMvcBuilders.standaloneSetup(new ChatController(chatService)).build();
+    return MockMvcBuilders.standaloneSetup(new ChatController(chatService))
+        .setControllerAdvice(new ApiExceptionHandler())
+        .build();
   }
 }

@@ -7,6 +7,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.quistock.ds_backend.exception.ErpIntegrationException;
+import com.quistock.ds_backend.handler.ApiExceptionHandler;
 import com.quistock.ds_backend.model.dto.BranchDTO;
 import com.quistock.ds_backend.service.BranchService;
 import java.util.List;
@@ -32,7 +34,24 @@ class BranchControllerTest {
         .andExpect(jsonPath("$[0].name").value("Santana Store"));
   }
 
+  @Test
+  void shouldReturn503WhenErpIsUnavailable() throws Exception {
+    BranchService branchService = mock(BranchService.class);
+    when(branchService.listBranches())
+        .thenThrow(
+            new ErpIntegrationException(
+                "Could not connect to the external ERP API.", new RuntimeException()));
+
+    mockMvc(branchService)
+        .perform(get("/api/branches").contextPath("/api"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.error").value("ERP_UNAVAILABLE"))
+        .andExpect(jsonPath("$.message").value("Could not connect to the external ERP API."));
+  }
+
   private MockMvc mockMvc(BranchService branchService) {
-    return MockMvcBuilders.standaloneSetup(new BranchController(branchService)).build();
+    return MockMvcBuilders.standaloneSetup(new BranchController(branchService))
+        .setControllerAdvice(new ApiExceptionHandler())
+        .build();
   }
 }

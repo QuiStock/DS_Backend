@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.quistock.ds_backend.exception.ErpIntegrationException;
+import com.quistock.ds_backend.exception.InvalidRequestException;
 import com.quistock.ds_backend.exception.ProductNotFoundException;
 import com.quistock.ds_backend.handler.ApiExceptionHandler;
 import com.quistock.ds_backend.model.dto.FlowDTO;
@@ -45,6 +46,38 @@ class FlowControllerTest {
   }
 
   @Test
+  void shouldReturnContractErrorWhenProductIdIsMissing() throws Exception {
+    FlowService flowService = mock(FlowService.class);
+
+    mockMvc(flowService)
+        .perform(
+            post("/api/flows/analyze")
+                .contextPath("/api")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
+        .andExpect(
+            jsonPath("$.message").value("Required fields are missing or invalid."));
+  }
+
+  @Test
+  void shouldReturnContractErrorForMalformedAnalyzeBody() throws Exception {
+    FlowService flowService = mock(FlowService.class);
+
+    mockMvc(flowService)
+        .perform(
+            post("/api/flows/analyze")
+                .contextPath("/api")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"product_id\":"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
+        .andExpect(
+            jsonPath("$.message").value("Required fields are missing or invalid."));
+  }
+
+  @Test
   void shouldListFlowsUsingContractFilters() throws Exception {
     FlowService flowService = mock(FlowService.class);
     when(flowService.listFlows("LOW", "PROD001:FIL001", "ANALYZED")).thenReturn(List.of(flow()));
@@ -62,6 +95,38 @@ class FlowControllerTest {
         .andExpect(jsonPath("$[0].product_id").value("PROD001:FIL001"))
         .andExpect(jsonPath("$[0].flow_type").value("LOW"))
         .andExpect(jsonPath("$[0].status").value("ANALYZED"));
+  }
+
+  @Test
+  void shouldReturn400ForUnsupportedFlowTypeFilter() throws Exception {
+    FlowService flowService = mock(FlowService.class);
+    when(flowService.listFlows("URGENT", null, null)).thenThrow(new InvalidRequestException());
+
+    mockMvc(flowService)
+        .perform(
+            get("/api/flows")
+                .contextPath("/api")
+                .queryParam("flow_type", "URGENT"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
+        .andExpect(
+            jsonPath("$.message").value("Required fields are missing or invalid."));
+  }
+
+  @Test
+  void shouldReturn400ForUnsupportedFlowStatusFilter() throws Exception {
+    FlowService flowService = mock(FlowService.class);
+    when(flowService.listFlows(null, null, "PENDING")).thenThrow(new InvalidRequestException());
+
+    mockMvc(flowService)
+        .perform(
+            get("/api/flows")
+                .contextPath("/api")
+                .queryParam("status", "PENDING"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
+        .andExpect(
+            jsonPath("$.message").value("Required fields are missing or invalid."));
   }
 
   @Test
