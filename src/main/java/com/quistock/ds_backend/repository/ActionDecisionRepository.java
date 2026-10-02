@@ -18,11 +18,11 @@ class ActionDecisionRepository {
     this.jdbc = jdbc;
   }
 
-  void updateTriageIfNeeded(long suggestionId, String status) {
+  void updateTriageIfNeeded(long suggestionId, String status, long employeeId) {
     if (TRIAGE.equals(status)) {
-      upsertTriage(suggestionId, "EDIT");
+      upsertTriage(suggestionId, "EDIT", employeeId);
     } else if (FORWARD.equals(status)) {
-      upsertTriage(suggestionId, "FORWARD");
+      upsertTriage(suggestionId, "FORWARD", employeeId);
     }
   }
 
@@ -31,19 +31,20 @@ class ActionDecisionRepository {
       String status,
       String justification,
       LocalDate validFrom,
-      LocalDate validUntil) {
+      LocalDate validUntil,
+      long managerId) {
     if (APPROVED.equals(status) || REJECTED.equals(status)) {
-      upsertDecision(suggestionId, status, justification, validFrom, validUntil);
+      upsertDecision(suggestionId, status, justification, validFrom, validUntil, managerId);
     }
   }
 
-  private void upsertTriage(long suggestionId, String action) {
+  private void upsertTriage(long suggestionId, String action, long employeeId) {
     jdbc.update(
         """
         INSERT INTO suggestion_triage
           (suggestion_id, employee_id, last_action, forwarded_at, updated_at)
         VALUES
-          (:suggestionId, NULL, CAST(:action AS triage_action),
+          (:suggestionId, :employeeId, CAST(:action AS triage_action),
            CASE WHEN :action = 'FORWARD' THEN CURRENT_TIMESTAMP ELSE NULL END,
            CURRENT_TIMESTAMP)
         ON CONFLICT (suggestion_id) DO UPDATE SET
@@ -54,6 +55,7 @@ class ActionDecisionRepository {
         """,
         new MapSqlParameterSource()
             .addValue("suggestionId", suggestionId)
+            .addValue("employeeId", employeeId)
             .addValue("action", action));
   }
 
@@ -62,7 +64,8 @@ class ActionDecisionRepository {
       String status,
       String justification,
       LocalDate validFrom,
-      LocalDate validUntil) {
+      LocalDate validUntil,
+      long managerId) {
     String decision = APPROVED.equals(status) ? "APPROVE" : "REJECT";
     boolean rejected = REJECTED.equals(status);
     jdbc.update(
@@ -71,11 +74,11 @@ class ActionDecisionRepository {
           suggestion_id, manager_id, decision, final_promotion_valid_from,
           final_promotion_valid_until, justification, decided_at
         ) VALUES (
-          :suggestionId, NULL, CAST(:decision AS decision_type),
+          :suggestionId, :managerId, CAST(:decision AS decision_type),
           :validFrom, :validUntil, :justification, CURRENT_TIMESTAMP
         )
         ON CONFLICT (suggestion_id) DO UPDATE SET
-          manager_id = NULL,
+          manager_id = EXCLUDED.manager_id,
           decision = EXCLUDED.decision,
           final_promotion_valid_from = EXCLUDED.final_promotion_valid_from,
           final_promotion_valid_until = EXCLUDED.final_promotion_valid_until,
@@ -84,6 +87,7 @@ class ActionDecisionRepository {
         """,
         new MapSqlParameterSource()
             .addValue("suggestionId", suggestionId)
+            .addValue("managerId", managerId)
             .addValue("decision", decision)
             .addValue("validFrom", rejected ? null : validFrom)
             .addValue("validUntil", rejected ? null : validUntil)

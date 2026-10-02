@@ -2,6 +2,7 @@ package com.quistock.ds_backend.controller;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -23,24 +24,28 @@ import com.quistock.ds_backend.service.ActionService;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class ActionControllerTest {
+  private static final long ACTOR_ID = 1001L;
 
   @Test
-  void shouldGenerateActionsOnPublicRoute() throws Exception {
+  void shouldGenerateActionsUsingAuthenticatedUser() throws Exception {
     ActionService actionService = mock(ActionService.class);
     ActionDTO action =
         new ActionDTO(
             "501", "PROMOTION", "GENERATED", "Product has expiration or excess stock risk.");
-    when(actionService.generateActions("101", null, null))
+    when(actionService.generateActions("101", null, null, ACTOR_ID))
         .thenReturn(new GenerateActionsResponse("101", List.of(action)));
 
     mockMvc(actionService)
         .perform(
             post("/api/actions/generate")
                 .contextPath("/api")
+                .with(testUser())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"flow_id\":\"101\"}"))
         .andExpect(status().isCreated())
@@ -69,13 +74,14 @@ class ActionControllerTest {
   @Test
   void shouldReturn404WhenFlowIsNotFound() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.generateActions("UNKNOWN", null, null))
+    when(actionService.generateActions("UNKNOWN", null, null, ACTOR_ID))
         .thenThrow(new FlowNotFoundException("UNKNOWN"));
 
     mockMvc(actionService)
         .perform(
             post("/api/actions/generate")
                 .contextPath("/api")
+                .with(testUser())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"flow_id\":\"UNKNOWN\"}"))
         .andExpect(status().isNotFound())
@@ -137,15 +143,17 @@ class ActionControllerTest {
   }
 
   @Test
-  void shouldUpdateActionStatusOnPublicRoute() throws Exception {
+  void shouldUpdateActionStatusUsingAuthenticatedUser() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.updateActionStatus("501", new UpdateActionStatusRequest("APPROVED")))
+    when(actionService.updateActionStatus(
+            "501", new UpdateActionStatusRequest("APPROVED"), ACTOR_ID))
         .thenReturn(new ActionStatusResponse("501", "APPROVED"));
 
     mockMvc(actionService)
         .perform(
             patch("/api/actions/501/status")
                 .contextPath("/api")
+                .with(testUser())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"APPROVED\"}"))
         .andExpect(status().isOk())
@@ -157,13 +165,15 @@ class ActionControllerTest {
   @Test
   void shouldReturn404WhenActionIsNotFound() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.updateActionStatus("UNKNOWN", new UpdateActionStatusRequest("APPROVED")))
+    when(actionService.updateActionStatus(
+            "UNKNOWN", new UpdateActionStatusRequest("APPROVED"), ACTOR_ID))
         .thenThrow(new ActionNotFoundException("UNKNOWN"));
 
     mockMvc(actionService)
         .perform(
             patch("/api/actions/UNKNOWN/status")
                 .contextPath("/api")
+                .with(testUser())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"APPROVED\"}"))
         .andExpect(status().isNotFound())
@@ -173,13 +183,15 @@ class ActionControllerTest {
   @Test
   void shouldReturn400ForUnsupportedActionStatus() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.updateActionStatus("501", new UpdateActionStatusRequest("INVALID")))
+    when(actionService.updateActionStatus(
+            "501", new UpdateActionStatusRequest("INVALID"), ACTOR_ID))
         .thenThrow(new InvalidActionStatusException("INVALID"));
 
     mockMvc(actionService)
         .perform(
             patch("/api/actions/501/status")
                 .contextPath("/api")
+                .with(testUser())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"INVALID\"}"))
         .andExpect(status().isBadRequest())
@@ -204,7 +216,12 @@ class ActionControllerTest {
 
   private MockMvc mockMvc(ActionService actionService) {
     return MockMvcBuilders.standaloneSetup(new ActionController(actionService))
+        .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
+  }
+
+  private RequestPostProcessor testUser() {
+    return jwt().jwt(token -> token.subject(Long.toString(ACTOR_ID)));
   }
 }

@@ -1,7 +1,7 @@
 # QuiStock API Contract
 
-Version: 1.3.0
-Last updated: 2026-09-30
+Version: 1.4.0
+Last updated: 2026-10-01
 
 ## Base URL
 
@@ -25,6 +25,26 @@ snapshot to the frontend. When no snapshot exists, the first product read trigge
 
 The external MockAPI currently uses Portuguese field names. Those names are kept only at
 the integration boundary; all public API fields and internal code identifiers are English.
+
+## Authentication
+
+All API routes require an access token in the `Authorization` header:
+
+```text
+Authorization: Bearer <access_token>
+```
+
+The separate authentication service is planned for another repository. This API currently
+acts as an OAuth2 resource server and accepts RS256 JWTs. It validates the token signature
+through the configured JWKS URL, as well as its issuer, audience, expiration, `sub`, and
+`email` claims. `sub` must be a
+positive numeric ID matching `user_account.id` in PostgreSQL; `email` must contain the account
+email. The expected audience is `quistock-api` by default. Configure `AUTH_JWT_ISSUER`,
+`AUTH_JWT_JWK_SET_URI`, and `AUTH_JWT_AUDIENCE` for the authentication service.
+
+Missing, invalid, or expired tokens return `401 Unauthorized`. Actor IDs written for suggestion
+creation, triage, decisions, and logs come from the authenticated `sub`, never from a request
+body. Role-based access rules are not part of the current contract.
 
 ---
 
@@ -79,6 +99,8 @@ is never based only on the product name or product code.
 Transformation rules:
 
 - `sku` receives the ERP `codigo_produto_erp` value.
+- `sku` is limited to 100 characters. The snapshot is rejected if an ERP product code exceeds
+  this database/API constraint.
 - `name` receives `nome_produto`.
 - `category` receives `categoria`.
 - `branch` receives `filial`.
@@ -96,6 +118,12 @@ Transformation rules:
 - `id` is deterministic from the ERP identifiers:
   `codigo_produto_erp:codigo_filial_erp`.
 
+The ERP contract requires each batch to include `data_validade`, `preco`, and `custo`;
+price and cost must be numeric and non-negative. If any batch violates these requirements,
+the snapshot is rejected and the previously persisted snapshot remains active. The ERP-provided
+`id` is preferred as the batch identifier, with `num_lote` as a fallback; the lot number may
+repeat because the persisted batch key also includes product and branch identifiers.
+
 The API preserves decimal quantities from PostgreSQL `NUMERIC(14,3)` fields. The ERP's
 7-day and 30-day sales aggregates are stored by product and branch because this endpoint does
 not return individual sales records to populate `sale` and `sale_item`.
@@ -108,8 +136,9 @@ milliseconds. Numeric values may be JSON numbers or numeric strings. The backend
 normalizes these formats before consolidation.
 
 An expired batch may produce a negative `expiration_days` value. The implementation uses
-the actual number of days between the current date and the expiration date. If no available
-batch has an expiration date, the field is `null`.
+the actual number of days between the current date and the expiration date. The ERP must send
+an expiration date on every batch; the field is `null` only when the consolidated product has
+no batch with positive stock.
 
 ### Optional filters
 
@@ -268,6 +297,9 @@ Possible types:
 - `PROMOTION`
 - `ORDER`
 
+PostgreSQL also reserves `MONITOR` for the future ML flow. The current rule-based action
+generation does not create `MONITOR` actions.
+
 Possible statuses:
 
 - `GENERATED`
@@ -411,10 +443,11 @@ Response 200:
 
 ---
 
-# 4. Chatbot (future scope)
+# 4. Chat prototype
 
-The AI chatbot is not part of the current API contract or persistence scope. Define its route
-and conversation storage when that feature is implemented.
+The current `/chat` route is a rule-based prototype. It does not call an AI/ML model and does
+not persist conversation history. The AI chat feature remains future scope. This route also
+requires the access token described in Authentication.
 
 ## 4.1 Send a chatbot message
 
@@ -429,7 +462,6 @@ Body:
 
 ```json
 {
-  "user_id": "1",
   "message": "Which products need a promotion?"
 }
 ```
@@ -477,8 +509,9 @@ Response 200:
 ]
 ```
 
-The current ERP batch source provides only the branch code and name. Additional branch
-metadata is therefore returned as `null` until a branch metadata source is integrated.
+The current ERP batch source provides only the branch code/name. It does not currently supply
+the `region_id`, address, or coordinates needed to populate the remaining branch metadata;
+those fields are therefore returned as `null` until a source and mapping are agreed.
 
 ---
 
@@ -548,6 +581,12 @@ Response 200:
 ---
 
 # 8. Error format
+
+## Authentication required
+
+Status: `401 Unauthorized`
+
+Returned when the bearer token is missing, expired, or fails signature/claim validation.
 
 ## Product not found
 

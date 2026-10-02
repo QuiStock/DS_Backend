@@ -1,6 +1,7 @@
 package com.quistock.ds_backend.repository;
 
 import com.quistock.ds_backend.model.dto.ErpBatchDTO;
+import com.quistock.ds_backend.util.ErpValueParser;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,13 +29,15 @@ class ErpSnapshotProcessor {
           "The ERP returned an empty product snapshot; the existing catalog was preserved.");
     }
 
+    batches.forEach(this::validateRequiredErpFields);
+
     Map<ProductStoreKey, List<ErpBatchDTO>> groups =
         batches.stream()
             .collect(
                 Collectors.groupingBy(
                     batch ->
                         new ProductStoreKey(
-                            ErpIdentifiers.required(batch.erpProductCode(), "product code"),
+                            ErpIdentifiers.productSku(batch.erpProductCode()),
                             ErpIdentifiers.storeId(batch)),
                     LinkedHashMap::new,
                     Collectors.toList()));
@@ -46,6 +49,24 @@ class ErpSnapshotProcessor {
         syncId, batches.size(), context.inserted, context.updated, deactivated);
     return new ErpSyncRepository.SyncResult(
         batches.size(), context.inserted, context.updated, deactivated);
+  }
+
+  private void validateRequiredErpFields(ErpBatchDTO batch) {
+    if (ErpValueParser.toLocalDate(batch.expirationDate()) == null) {
+      throw new IllegalArgumentException("The ERP record is missing expiration date.");
+    }
+    requireNonNegativeDecimal(batch.price(), "price");
+    requireNonNegativeDecimal(batch.cost(), "cost");
+  }
+
+  private void requireNonNegativeDecimal(Object value, String field) {
+    BigDecimal amount = ErpValueParser.toBigDecimal(value);
+    if (amount == null) {
+      throw new IllegalArgumentException("The ERP record is missing " + field + ".");
+    }
+    if (amount.signum() < 0) {
+      throw new IllegalArgumentException("The ERP record has a negative " + field + ".");
+    }
   }
 
   private void persistProductStore(
