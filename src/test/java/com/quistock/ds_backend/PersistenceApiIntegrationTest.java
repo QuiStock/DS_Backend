@@ -111,19 +111,14 @@ class PersistenceApiIntegrationTest {
 
     String validSnapshot = initialErpPayload();
     shouldRejectSnapshot(
-        validSnapshot.replaceFirst(
-            "\"data_validade\":\"[^\"]+\"", "\"data_validade\":null"));
+        validSnapshot.replaceFirst("\"data_validade\":\"[^\"]+\"", "\"data_validade\":null"));
     shouldRejectSnapshot(
         validSnapshot.replaceFirst(
             "\"data_validade\":\"[^\"]+\"", "\"data_validade\":\"invalid-date\""));
-    shouldRejectSnapshot(
-        validSnapshot.replaceFirst("\"preco\":\"[^\"]+\"", "\"preco\":null"));
-    shouldRejectSnapshot(
-        validSnapshot.replaceFirst("\"preco\":\"[^\"]+\"", "\"preco\":\"-1.00\""));
-    shouldRejectSnapshot(
-        validSnapshot.replaceFirst("\"custo\":\"[^\"]+\"", "\"custo\":null"));
-    shouldRejectSnapshot(
-        validSnapshot.replaceFirst("\"custo\":\"[^\"]+\"", "\"custo\":\"-1.00\""));
+    shouldRejectSnapshot(validSnapshot.replaceFirst("\"preco\":\"[^\"]+\"", "\"preco\":null"));
+    shouldRejectSnapshot(validSnapshot.replaceFirst("\"preco\":\"[^\"]+\"", "\"preco\":\"-1.00\""));
+    shouldRejectSnapshot(validSnapshot.replaceFirst("\"custo\":\"[^\"]+\"", "\"custo\":null"));
+    shouldRejectSnapshot(validSnapshot.replaceFirst("\"custo\":\"[^\"]+\"", "\"custo\":\"-1.00\""));
     shouldRejectSnapshot(validSnapshot.replaceFirst("SKU-HIGH", "A".repeat(101)));
 
     String highFlowId = analyze("SKU-HIGH:STORE-1", "HIGH");
@@ -145,7 +140,7 @@ class PersistenceApiIntegrationTest {
             """
             {"flow_id":"%s","promotion_valid_from":"%s","promotion_valid_until":"%s"}
             """
-            .formatted(lowFlowId, LocalDate.now().plusDays(1), LocalDate.now().plusDays(8)),
+                .formatted(lowFlowId, LocalDate.now().plusDays(1), LocalDate.now().plusDays(8)),
             201);
     JsonNode noAction =
         post("/api/actions/generate", "{\"flow_id\":\"" + mediumFlowId + "\"}", 201);
@@ -251,8 +246,7 @@ class PersistenceApiIntegrationTest {
         HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/products"))
             .GET()
             .build();
-    HttpResponse<String> response =
-        http.send(request, HttpResponse.BodyHandlers.ofString());
+    HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
     assertThat(response.statusCode()).isEqualTo(401);
   }
 
@@ -262,8 +256,7 @@ class PersistenceApiIntegrationTest {
             .header("Authorization", "Bearer invalid-token")
             .GET()
             .build();
-    HttpResponse<String> response =
-        http.send(request, HttpResponse.BodyHandlers.ofString());
+    HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
     assertThat(response.statusCode()).isEqualTo(401);
   }
 
@@ -278,11 +271,7 @@ class PersistenceApiIntegrationTest {
             Instant.now().plusSeconds(300)));
     assertUnauthorized(
         signedToken(
-            TEST_ISSUER,
-            null,
-            "1001",
-            "mobile@test.example",
-            Instant.now().plusSeconds(300)));
+            TEST_ISSUER, null, "1001", "mobile@test.example", Instant.now().plusSeconds(300)));
     assertUnauthorized(
         signedToken(
             TEST_ISSUER,
@@ -314,8 +303,7 @@ class PersistenceApiIntegrationTest {
             .header("Authorization", "Bearer " + token)
             .GET()
             .build();
-    HttpResponse<String> response =
-        http.send(request, HttpResponse.BodyHandlers.ofString());
+    HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
     assertThat(response.statusCode()).isEqualTo(401);
   }
 
@@ -389,55 +377,55 @@ class PersistenceApiIntegrationTest {
   private static String initialErpPayload() {
     LocalDate today = LocalDate.now();
     return """
-        [
-          {
-            "id":"HIGH-1","codigo_produto_erp":"SKU-HIGH","nome_produto":"Milk",
-            "categoria":"Dairy","num_lote":"H-1","data_validade":"%s",
-            "quantidade":"3","preco":"7.90","custo":"5.20",
-            "codigo_filial_erp":"STORE-1","filial":"North Branch",
-            "certificado_qualidade":true,"data_entrada":"2026-08-20T08:00:00Z",
-            "vendas_7d":"7","vendas_30d":"30","estoque_minimo":"10","lead_time_dias":"5"
-          },
-          {
-            "id":"HIGH-2","codigo_produto_erp":"SKU-HIGH","nome_produto":"Milk",
-            "categoria":"Dairy","num_lote":"H-2","data_validade":"%s",
-            "quantidade":"5","preco":"8.10","custo":"5.40",
-            "codigo_filial_erp":"STORE-1","filial":"North Branch",
-            "certificado_qualidade":true,"data_entrada":"2026-08-21T08:00:00Z",
-            "vendas_7d":"7","vendas_30d":"30","estoque_minimo":"10","lead_time_dias":"5"
-          },
-          {
-            "id":"MED-1","codigo_produto_erp":"SKU-MEDIUM","nome_produto":"Oats",
-            "categoria":"Cereals","num_lote":"M-1","data_validade":"%s",
-            "quantidade":"50","preco":"4.50","custo":"2.70",
-            "codigo_filial_erp":"STORE-1","filial":"North Branch",
-            "certificado_qualidade":true,"data_entrada":"2026-08-22T08:00:00Z",
-            "vendas_7d":"7","vendas_30d":"30","estoque_minimo":"20","lead_time_dias":"5"
-          },
-          {
-            "id":"LOW-1","codigo_produto_erp":"SKU-LOW","nome_produto":"Juice",
-            "categoria":"Beverages","num_lote":"L-1","data_validade":"%s",
-            "quantidade":"100","preco":"3.50","custo":"1.90",
-            "filial":"South Branch","certificado_qualidade":false,
-            "data_entrada":"2026-08-23T08:00:00Z","vendas_7d":"0","vendas_30d":"0",
-            "estoque_minimo":"20","lead_time_dias":"3"
-          }
-        ]
-        """
+    [
+      {
+        "id":"HIGH-1","codigo_produto_erp":"SKU-HIGH","nome_produto":"Milk",
+        "categoria":"Dairy","num_lote":"H-1","data_validade":"%s",
+        "quantidade":"3","preco":"7.90","custo":"5.20",
+        "codigo_filial_erp":"STORE-1","filial":"North Branch",
+        "certificado_qualidade":true,"data_entrada":"2026-08-20T08:00:00Z",
+        "vendas_7d":"7","vendas_30d":"30","estoque_minimo":"10","lead_time_dias":"5"
+      },
+      {
+        "id":"HIGH-2","codigo_produto_erp":"SKU-HIGH","nome_produto":"Milk",
+        "categoria":"Dairy","num_lote":"H-2","data_validade":"%s",
+        "quantidade":"5","preco":"8.10","custo":"5.40",
+        "codigo_filial_erp":"STORE-1","filial":"North Branch",
+        "certificado_qualidade":true,"data_entrada":"2026-08-21T08:00:00Z",
+        "vendas_7d":"7","vendas_30d":"30","estoque_minimo":"10","lead_time_dias":"5"
+      },
+      {
+        "id":"MED-1","codigo_produto_erp":"SKU-MEDIUM","nome_produto":"Oats",
+        "categoria":"Cereals","num_lote":"M-1","data_validade":"%s",
+        "quantidade":"50","preco":"4.50","custo":"2.70",
+        "codigo_filial_erp":"STORE-1","filial":"North Branch",
+        "certificado_qualidade":true,"data_entrada":"2026-08-22T08:00:00Z",
+        "vendas_7d":"7","vendas_30d":"30","estoque_minimo":"20","lead_time_dias":"5"
+      },
+      {
+        "id":"LOW-1","codigo_produto_erp":"SKU-LOW","nome_produto":"Juice",
+        "categoria":"Beverages","num_lote":"L-1","data_validade":"%s",
+        "quantidade":"100","preco":"3.50","custo":"1.90",
+        "filial":"South Branch","certificado_qualidade":false,
+        "data_entrada":"2026-08-23T08:00:00Z","vendas_7d":"0","vendas_30d":"0",
+        "estoque_minimo":"20","lead_time_dias":"3"
+      }
+    ]
+    """
         .formatted(today.plusDays(30), today.plusDays(45), today.plusDays(365), today.plusDays(5));
   }
 
   private static String updatedErpPayload() {
     return """
-        [{
-          "id":"HIGH-1","codigo_produto_erp":"SKU-HIGH","nome_produto":"Milk",
-          "categoria":"Dairy","num_lote":"H-1","data_validade":"%s",
-          "quantidade":"10","preco":"8.25","custo":"5.50",
-          "codigo_filial_erp":"STORE-1","filial":"North Branch",
-          "certificado_qualidade":true,"data_entrada":"2026-08-24T08:00:00Z",
-          "vendas_7d":"7","vendas_30d":"30","estoque_minimo":"10","lead_time_dias":"5"
-        }]
-        """
+    [{
+      "id":"HIGH-1","codigo_produto_erp":"SKU-HIGH","nome_produto":"Milk",
+      "categoria":"Dairy","num_lote":"H-1","data_validade":"%s",
+      "quantidade":"10","preco":"8.25","custo":"5.50",
+      "codigo_filial_erp":"STORE-1","filial":"North Branch",
+      "certificado_qualidade":true,"data_entrada":"2026-08-24T08:00:00Z",
+      "vendas_7d":"7","vendas_30d":"30","estoque_minimo":"10","lead_time_dias":"5"
+    }]
+    """
         .formatted(LocalDate.now().plusDays(30));
   }
 
