@@ -3,7 +3,7 @@
 - **Repositório de destino:** [QuiStock/DS_Auth](https://github.com/QuiStock/DS_Auth)
 - **Documento mantido em:** QuiStock/DS_Backend
 - **Revisão dos repositórios:** 2026-10-02
-- **Status:** implementado localmente em DS_Auth; validação final e configuração dos ambientes ainda pendentes. MongoDB, BCrypt, provisionamento SQL externo e retirada futura do Firebase Auth no Mobile foram confirmados. Esta implementação não altera o código do Mobile.
+- **Status:** implementação local em DS_Auth validada com PostgreSQL e MongoDB Testcontainers; 17 testes, estilo, análise estática e cobertura aprovados em 2026-10-02. Secrets e URLs dos ambientes de deploy, migração SQL e integração futura do Mobile continuam pendentes. Esta implementação não altera o código do Mobile.
 
 Este documento fecha o contrato entre DS_Auth, DS_Backend, o schema PostgreSQL e o app Android QuiStock Mobile. A implementação local da API está descrita na seção 9.1; a integração do Mobile e a configuração de produção continuam em entregas posteriores.
 
@@ -254,10 +254,11 @@ A configuração JWKS do DS_Backend, a migração SQL do índice funcional, secr
 
 ### 9.2 Resultado de validação local
 
-- Google Java Format 1.28.0 em modo de verificação e `git diff --check`: aprovados.
-- PMD 7.16.0 sobre `src/main/java`: aprovado; o PMD imprime um aviso padrão sobre `LoosePackageCoupling` não configurado.
-- Os gates Gradle e testes não chegaram a executar. O Gradle 9.7.1 falha durante a inicialização do daemon com `java.io.IOException: Unable to establish loopback connection`, inclusive fora do sandbox e usando o JDK 21 disponível. O JDK configurado no projeto é 25; o JDK padrão local é 17. Docker também não está disponível para o Testcontainers.
-- Depois de disponibilizar JDK 25, permitir a conexão loopback do Gradle e iniciar Docker com suporte a containers, executar os comandos listados no README de DS_Auth. Ainda falta confirmar Checkstyle, compilação, testes Testcontainers e o limite de cobertura de 80%.
+- Em 2026-10-02, a validação foi executada no Windows com Gradle 9.7.1, Temurin JDK 25 e Docker Desktop. Testcontainers iniciou PostgreSQL 16 e MongoDB 8.0 configurado como replica set.
+- Comando aprovado: `./gradlew spotlessCheck checkstyleMain pmdMain test jacocoTestCoverageVerification --no-daemon --console=plain` (Windows: `gradlew.bat`). Todos os 17 testes passaram, incluindo integração HTTP, PostgreSQL e rotação transacional no MongoDB. A cobertura de linhas JaCoCo foi 85,17%, acima do mínimo de 80%.
+- Spotless, Checkstyle e PMD passaram. A compilação principal e a compilação de testes também passaram.
+- No Windows deste ambiente, foi preciso apontar `TEMP`/`TMP` para uma pasta local e configurar `-Djdk.net.unixdomain.tmpdir` para ela, pois o Gradle não conseguia estabelecer a conexão loopback com a pasta temporária padrão. Essa adaptação é local e não altera o código do serviço.
+- Os testes iniciam o servidor com context path `/api`, igual ao contrato documentado. A validação ponta a ponta no emulador Mobile, a migração SQL e a configuração de secrets/URLs nos ambientes de deploy continuam pendentes.
 
 ## 10. Critérios de aceite e testes
 
@@ -295,7 +296,7 @@ A configuração JWKS do DS_Backend, a migração SQL do índice funcional, secr
 5. Implementar documentos, índices, transação de refresh, replay, logout, rate limit e erros. **Implementado localmente.**
 6. Atualizar configuração JWKS do DS_Backend.
 7. Em tarefa futura, atualizar Mobile para login/logout/refresh, armazenamento protegido e Bearer no Retrofit; alinhar request de chat e estados de rede.
-8. Executar testes unitários, integração PostgreSQL/Mongo replica set e gates Gradle. **Testes configurados; execução final pendente neste ambiente.** Validar fluxo ponta a ponta em emulador na entrega Mobile.
+8. Executar testes unitários, integração PostgreSQL/Mongo replica set e gates Gradle. **Concluído localmente em 2026-10-02: 17 testes e todos os gates aprovados, incluindo cobertura mínima de 80%.** Validar fluxo ponta a ponta em emulador na entrega Mobile.
 9. Configurar secrets, issuer, JWKS público, URLs HTTPS, credenciais read-only e monitoramento por ambiente antes de disponibilizar a API.
 
 ## 12. Dependências operacionais para produção
