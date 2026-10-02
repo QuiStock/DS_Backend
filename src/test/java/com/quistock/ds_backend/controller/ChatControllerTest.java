@@ -20,7 +20,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class ChatControllerTest {
 
   @Test
-  void shouldAnswerChatOnPublicRoute() throws Exception {
+  void shouldAnswerChatForValidRequest() throws Exception {
     ChatService chatService = mock(ChatService.class);
     ChatResponse response =
         new ChatResponse(
@@ -35,7 +35,7 @@ class ChatControllerTest {
             post("/api/chat")
                 .contextPath("/api")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"user_id\":\"1\",\"message\":\"Which products need a promotion?\"}"))
+                .content("{\"message\":\"Which products need a promotion?\"}"))
         .andExpect(status().isOk())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.answer").value(response.answer()))
@@ -55,22 +55,7 @@ class ChatControllerTest {
             post("/api/chat")
                 .contextPath("/api")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"user_id\":\"1\"}"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
-        .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
-  }
-
-  @Test
-  void shouldReturnContractErrorWhenUserIdIsMissing() throws Exception {
-    ChatService chatService = mock(ChatService.class);
-
-    mockMvc(chatService)
-        .perform(
-            post("/api/chat")
-                .contextPath("/api")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"message\":\"Which products need a promotion?\"}"))
+                .content("{}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
         .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));

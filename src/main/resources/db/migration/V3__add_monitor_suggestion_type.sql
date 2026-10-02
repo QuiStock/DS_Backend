@@ -1,0 +1,1 @@
+ALTER TYPE "suggestion_type" ADD VALUE IF NOT EXISTS 'MONITOR';

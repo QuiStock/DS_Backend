@@ -3,6 +3,15 @@ package com.quistock.ds_backend;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.RSASSASigner;
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -12,7 +21,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Date;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
@@ -32,6 +43,11 @@ import tools.jackson.databind.ObjectMapper;
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class PersistenceApiIntegrationTest {
+  private static final long TEST_USER_ID = 1001L;
+  private static final String TEST_ISSUER = "https://auth.test.example";
+  private static final String TEST_AUDIENCE = "quistock-api";
+  private static final RSAKey TEST_SIGNING_KEY = newTestSigningKey();
+
   @Container
   private static final PostgreSQLContainer POSTGRES =
       new PostgreSQLContainer("postgres:17-alpine")
@@ -59,6 +75,11 @@ class PersistenceApiIntegrationTest {
     registry.add("spring.datasource.driver-class-name", POSTGRES::getDriverClassName);
     registry.add("spring.flyway.enabled", () -> true);
     registry.add("server.servlet.context-path", () -> "/api");
+    registry.add("auth.jwt.issuer", () -> TEST_ISSUER);
+    registry.add("auth.jwt.audience", () -> TEST_AUDIENCE);
+    registry.add(
+        "auth.jwt.jwk-set-uri",
+        () -> "http://127.0.0.1:" + erpServer.getAddress().getPort() + "/jwks");
     registry.add("erp.sync.enabled", () -> true);
     registry.add("erp.sync.initial-delay-ms", () -> 3_600_000);
     registry.add("erp.api.base-url", () -> "http://127.0.0.1:" + erpServer.getAddress().getPort());
@@ -73,6 +94,10 @@ class PersistenceApiIntegrationTest {
 
   @Test
   void persistsErpDataAndServesTheOperationalApiFlow() throws Exception {
+    assertRequestWithoutTokenIsUnauthorized();
+    assertRequestWithInvalidTokenIsUnauthorized();
+    assertRequestWithInvalidClaimsIsUnauthorized();
+    seedAuthenticatedUser();
     ERP_RESPONSE.set(initialErpPayload());
 
     JsonNode products = get("/api/products", 200);
@@ -84,9 +109,31 @@ class PersistenceApiIntegrationTest {
     assertThat(get("/api/erp-integration/status", 200).path("status").asText())
         .isEqualTo("CONNECTED");
 
+    String validSnapshot = initialErpPayload();
+    shouldRejectSnapshot(
+        validSnapshot.replaceFirst(
+            "\"data_validade\":\"[^\"]+\"", "\"data_validade\":null"));
+    shouldRejectSnapshot(
+        validSnapshot.replaceFirst(
+            "\"data_validade\":\"[^\"]+\"", "\"data_validade\":\"invalid-date\""));
+    shouldRejectSnapshot(
+        validSnapshot.replaceFirst("\"preco\":\"[^\"]+\"", "\"preco\":null"));
+    shouldRejectSnapshot(
+        validSnapshot.replaceFirst("\"preco\":\"[^\"]+\"", "\"preco\":\"-1.00\""));
+    shouldRejectSnapshot(
+        validSnapshot.replaceFirst("\"custo\":\"[^\"]+\"", "\"custo\":null"));
+    shouldRejectSnapshot(
+        validSnapshot.replaceFirst("\"custo\":\"[^\"]+\"", "\"custo\":\"-1.00\""));
+    shouldRejectSnapshot(validSnapshot.replaceFirst("SKU-HIGH", "A".repeat(101)));
+
     String highFlowId = analyze("SKU-HIGH:STORE-1", "HIGH");
     String mediumFlowId = analyze("SKU-MEDIUM:STORE-1", "MEDIUM");
     String lowFlowId = analyze("SKU-LOW:South Branch", "LOW");
+    assertThat(
+            post("/api/chat", "{\"message\":\"Which products need a promotion?\"}", 200)
+                .path("referenced_data")
+                .isArray())
+        .isTrue();
     assertThat(get("/api/flows?flow_type=HIGH", 200).size()).isEqualTo(1);
     assertThat(get("/api/flows?product_id=SKU-HIGH:STORE-1&status=ANALYZED", 200).size())
         .isEqualTo(1);
@@ -98,7 +145,7 @@ class PersistenceApiIntegrationTest {
             """
             {"flow_id":"%s","promotion_valid_from":"%s","promotion_valid_until":"%s"}
             """
-                .formatted(lowFlowId, LocalDate.now().plusDays(1), LocalDate.now().plusDays(8)),
+            .formatted(lowFlowId, LocalDate.now().plusDays(1), LocalDate.now().plusDays(8)),
             201);
     JsonNode noAction =
         post("/api/actions/generate", "{\"flow_id\":\"" + mediumFlowId + "\"}", 201);
@@ -106,9 +153,24 @@ class PersistenceApiIntegrationTest {
     assertThat(promotion.path("generated_actions").size()).isEqualTo(1);
     assertThat(noAction.path("generated_actions").size()).isZero();
 
+    long promotionSuggestionId =
+        Long.parseLong(promotion.path("generated_actions").get(0).path("id").asText());
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT created_by_id FROM suggestion WHERE id = ?",
+                Long.class,
+                promotionSuggestionId))
+        .isEqualTo(TEST_USER_ID);
+
     String orderId = order.path("generated_actions").get(0).path("id").asText();
     String promotionId = promotion.path("generated_actions").get(0).path("id").asText();
     patch("/api/actions/" + promotionId + "/status", "{\"status\":\"IN_EMPLOYEE_TRIAGE\"}", 200);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT employee_id FROM suggestion_triage WHERE suggestion_id = ?",
+                Long.class,
+                promotionSuggestionId))
+        .isEqualTo(TEST_USER_ID);
     patch("/api/actions/" + promotionId + "/status", "{\"status\":\"SENT_TO_MANAGER\"}", 200);
     patch(
         "/api/actions/" + promotionId + "/status",
@@ -117,6 +179,12 @@ class PersistenceApiIntegrationTest {
         """
             .formatted(LocalDate.now().plusDays(2), LocalDate.now().plusDays(9)),
         200);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT manager_id FROM suggestion_decision WHERE suggestion_id = ?",
+                Long.class,
+                promotionSuggestionId))
+        .isEqualTo(TEST_USER_ID);
     patch(
         "/api/actions/" + orderId + "/status",
         "{\"status\":\"REJECTED\",\"justification\":\"Demand changed\"}",
@@ -125,6 +193,12 @@ class PersistenceApiIntegrationTest {
     assertThat(get("/api/actions?status=APPROVED&action_type=PROMOTION", 200).size()).isEqualTo(1);
     assertThat(get("/api/dashboard/summary", 200).isObject()).isTrue();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM suggestion_log", Integer.class))
+        .isEqualTo(6);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM suggestion_log WHERE user_id = ?",
+                Integer.class,
+                TEST_USER_ID))
         .isEqualTo(6);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM suggestion_decision", Integer.class))
         .isEqualTo(2);
@@ -154,6 +228,97 @@ class PersistenceApiIntegrationTest {
     return get("/api/products/" + publicId, 200);
   }
 
+  private void shouldRejectSnapshot(String payload) throws Exception {
+    ERP_RESPONSE.set(payload);
+    assertThatThrownBy(erpSyncService::syncNow)
+        .isInstanceOf(com.quistock.ds_backend.exception.ErpIntegrationException.class);
+    assertThat(get("/api/products", 200).size()).isEqualTo(3);
+  }
+
+  private void seedAuthenticatedUser() {
+    jdbc.update("INSERT INTO role (id, code, name) VALUES (?, 'TEST', 'Test')", TEST_USER_ID);
+    jdbc.update(
+        "INSERT INTO user_account (id, role_id, name, email, password_hash) VALUES (?, ?, ?, ?, ?)",
+        TEST_USER_ID,
+        TEST_USER_ID,
+        "Mobile User",
+        "mobile@test.example",
+        "test-hash");
+  }
+
+  private void assertRequestWithoutTokenIsUnauthorized() throws Exception {
+    HttpRequest request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/products"))
+            .GET()
+            .build();
+    HttpResponse<String> response =
+        http.send(request, HttpResponse.BodyHandlers.ofString());
+    assertThat(response.statusCode()).isEqualTo(401);
+  }
+
+  private void assertRequestWithInvalidTokenIsUnauthorized() throws Exception {
+    HttpRequest request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/products"))
+            .header("Authorization", "Bearer invalid-token")
+            .GET()
+            .build();
+    HttpResponse<String> response =
+        http.send(request, HttpResponse.BodyHandlers.ofString());
+    assertThat(response.statusCode()).isEqualTo(401);
+  }
+
+  private void assertRequestWithInvalidClaimsIsUnauthorized() throws Exception {
+    assertUnauthorized(withInvalidSignature(validToken()));
+    assertUnauthorized(
+        signedToken(
+            TEST_ISSUER,
+            "another-api",
+            "1001",
+            "mobile@test.example",
+            Instant.now().plusSeconds(300)));
+    assertUnauthorized(
+        signedToken(
+            TEST_ISSUER,
+            null,
+            "1001",
+            "mobile@test.example",
+            Instant.now().plusSeconds(300)));
+    assertUnauthorized(
+        signedToken(
+            TEST_ISSUER,
+            TEST_AUDIENCE,
+            "not-a-sql-id",
+            "mobile@test.example",
+            Instant.now().plusSeconds(300)));
+    assertUnauthorized(
+        signedToken(
+            "https://wrong-issuer.test.example",
+            TEST_AUDIENCE,
+            "1001",
+            "mobile@test.example",
+            Instant.now().plusSeconds(300)));
+    assertUnauthorized(
+        signedToken(TEST_ISSUER, TEST_AUDIENCE, "1001", null, Instant.now().plusSeconds(300)));
+    assertUnauthorized(
+        signedToken(
+            TEST_ISSUER,
+            TEST_AUDIENCE,
+            "1001",
+            "mobile@test.example",
+            Instant.now().minusSeconds(600)));
+  }
+
+  private void assertUnauthorized(String token) throws Exception {
+    HttpRequest request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/products"))
+            .header("Authorization", "Bearer " + token)
+            .GET()
+            .build();
+    HttpResponse<String> response =
+        http.send(request, HttpResponse.BodyHandlers.ofString());
+    assertThat(response.statusCode()).isEqualTo(401);
+  }
+
   private JsonNode get(String path, int expectedStatus) throws Exception {
     return exchange(HttpMethod.GET, path, null, expectedStatus);
   }
@@ -169,7 +334,8 @@ class PersistenceApiIntegrationTest {
   private JsonNode exchange(HttpMethod method, String path, String body, int expectedStatus)
       throws Exception {
     HttpRequest.Builder request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path));
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
+            .header("Authorization", "Bearer " + validToken());
     if (body == null) {
       request.GET();
     } else {
@@ -191,6 +357,19 @@ class PersistenceApiIntegrationTest {
     }
     try {
       erpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+      erpServer.createContext(
+          "/jwks",
+          exchange -> {
+            byte[] body =
+                new JWKSet(TEST_SIGNING_KEY.toPublicJWK())
+                    .toString()
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+              output.write(body);
+            }
+          });
       erpServer.createContext(
           "/products",
           exchange -> {
@@ -260,5 +439,58 @@ class PersistenceApiIntegrationTest {
         }]
         """
         .formatted(LocalDate.now().plusDays(30));
+  }
+
+  private static RSAKey newTestSigningKey() {
+    try {
+      return new RSAKeyGenerator(2048).keyID("test-key").generate();
+    } catch (JOSEException exception) {
+      throw new IllegalStateException("Could not create a test signing key.", exception);
+    }
+  }
+
+  private static String validToken() {
+    return signedToken(
+        TEST_ISSUER,
+        TEST_AUDIENCE,
+        Long.toString(TEST_USER_ID),
+        "mobile@test.example",
+        Instant.now().plusSeconds(300));
+  }
+
+  private static String withInvalidSignature(String token) {
+    int signatureStart = token.lastIndexOf('.') + 1;
+    char firstSignatureCharacter = token.charAt(signatureStart);
+    char replacement = firstSignatureCharacter == 'A' ? 'B' : 'A';
+    return token.substring(0, signatureStart) + replacement + token.substring(signatureStart + 1);
+  }
+
+  private static String signedToken(
+      String issuer, String audience, String subject, String email, Instant expiresAt) {
+    JWTClaimsSet.Builder claims =
+        new JWTClaimsSet.Builder()
+            .issuer(issuer)
+            .issueTime(Date.from(Instant.now()))
+            .expirationTime(Date.from(expiresAt))
+            .jwtID(java.util.UUID.randomUUID().toString());
+    if (audience != null) {
+      claims.audience(audience);
+    }
+    if (subject != null) {
+      claims.subject(subject);
+    }
+    if (email != null) {
+      claims.claim("email", email);
+    }
+    SignedJWT token =
+        new SignedJWT(
+            new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(TEST_SIGNING_KEY.getKeyID()).build(),
+            claims.build());
+    try {
+      token.sign(new RSASSASigner(TEST_SIGNING_KEY));
+      return token.serialize();
+    } catch (JOSEException exception) {
+      throw new IllegalStateException("Could not sign a test access token.", exception);
+    }
   }
 }

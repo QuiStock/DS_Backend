@@ -24,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class ActionServiceTest {
+  private static final long ACTOR_ID = 1001L;
   private static final LocalDate PROMOTION_START = LocalDate.of(2026, 10, 1);
   private static final LocalDate PROMOTION_END = LocalDate.of(2026, 10, 7);
 
@@ -48,11 +49,12 @@ class ActionServiceTest {
             "PROMOTION",
             "Expiration or excess-stock risk: create a promotion.",
             PROMOTION_START,
-            PROMOTION_END))
+            PROMOTION_END,
+            ACTOR_ID))
         .thenReturn(action);
 
     GenerateActionsResponse response =
-        actionService.generateActions("101", PROMOTION_START, PROMOTION_END);
+        actionService.generateActions("101", PROMOTION_START, PROMOTION_END, ACTOR_ID);
 
     assertThat(response.flowId()).isEqualTo("101");
     assertThat(response.generatedActions()).containsExactly(action);
@@ -64,10 +66,11 @@ class ActionServiceTest {
     ActionDTO action = action("501", "ORDER", "GENERATED");
     when(flowService.findFlowById("101")).thenReturn(flow);
     when(actionRepository.createGenerated(
-            flow, "ORDER", "Stockout risk: replenish stock.", null, null))
+            flow, "ORDER", "Stockout risk: replenish stock.", null, null, ACTOR_ID))
         .thenReturn(action);
 
-    ActionDTO generated = actionService.generateActions("101").generatedActions().get(0);
+    ActionDTO generated =
+        actionService.generateActions("101", null, null, ACTOR_ID).generatedActions().get(0);
 
     assertThat(generated.actionType()).isEqualTo("ORDER");
     assertThat(generated.status()).isEqualTo("GENERATED");
@@ -77,14 +80,15 @@ class ActionServiceTest {
   void shouldGenerateNoActionForMediumFlow() {
     when(flowService.findFlowById("101")).thenReturn(flow("101", "MEDIUM"));
 
-    assertThat(actionService.generateActions("101").generatedActions()).isEmpty();
+    assertThat(actionService.generateActions("101", null, null, ACTOR_ID).generatedActions())
+        .isEmpty();
   }
 
   @Test
   void shouldPropagateFlowNotFound() {
     when(flowService.findFlowById("UNKNOWN")).thenThrow(new FlowNotFoundException("UNKNOWN"));
 
-    assertThatThrownBy(() -> actionService.generateActions("UNKNOWN"))
+    assertThatThrownBy(() -> actionService.generateActions("UNKNOWN", null, null, ACTOR_ID))
         .isInstanceOf(FlowNotFoundException.class);
   }
 
@@ -92,7 +96,8 @@ class ActionServiceTest {
   void shouldRejectPromotionDatesForNonPromotionFlow() {
     when(flowService.findFlowById("101")).thenReturn(flow("101", "HIGH"));
 
-    assertThatThrownBy(() -> actionService.generateActions("101", PROMOTION_START, PROMOTION_END))
+    assertThatThrownBy(
+            () -> actionService.generateActions("101", PROMOTION_START, PROMOTION_END, ACTOR_ID))
         .isInstanceOf(InvalidRequestException.class);
   }
 
@@ -130,10 +135,10 @@ class ActionServiceTest {
   void shouldUpdateActionStatus() {
     UpdateActionStatusRequest request = new UpdateActionStatusRequest("APPROVED");
     when(actionRepository.findTypeById("501")).thenReturn("PROMOTION");
-    when(actionRepository.updateStatus("501", request))
+    when(actionRepository.updateStatus("501", request, ACTOR_ID))
         .thenReturn(new ActionStatusResponse("501", "APPROVED"));
 
-    ActionStatusResponse response = actionService.updateActionStatus("501", request);
+    ActionStatusResponse response = actionService.updateActionStatus("501", request, ACTOR_ID);
 
     assertThat(response.id()).isEqualTo("501");
     assertThat(response.status()).isEqualTo("APPROVED");
@@ -145,13 +150,16 @@ class ActionServiceTest {
         new UpdateActionStatusRequest("APPROVED", null, PROMOTION_START, PROMOTION_END);
     when(actionRepository.findTypeById("501")).thenReturn("ORDER");
 
-    assertThatThrownBy(() -> actionService.updateActionStatus("501", request))
+    assertThatThrownBy(() -> actionService.updateActionStatus("501", request, ACTOR_ID))
         .isInstanceOf(InvalidRequestException.class);
   }
 
   @Test
   void shouldRejectUnsupportedActionStatus() {
-    assertThatThrownBy(() -> actionService.updateActionStatus("501", "INVALID"))
+    assertThatThrownBy(
+            () ->
+                actionService.updateActionStatus(
+                    "501", new UpdateActionStatusRequest("INVALID"), ACTOR_ID))
         .isInstanceOf(InvalidActionStatusException.class);
   }
 
@@ -159,13 +167,16 @@ class ActionServiceTest {
   void shouldRequireJustificationWhenRejectingAction() {
     UpdateActionStatusRequest request = new UpdateActionStatusRequest("REJECTED", " ", null, null);
 
-    assertThatThrownBy(() -> actionService.updateActionStatus("501", request))
+    assertThatThrownBy(() -> actionService.updateActionStatus("501", request, ACTOR_ID))
         .isInstanceOf(InvalidRequestException.class);
   }
 
   @Test
   void shouldRejectUnknownAction() {
-    assertThatThrownBy(() -> actionService.updateActionStatus("UNKNOWN", "APPROVED"))
+    assertThatThrownBy(
+            () ->
+                actionService.updateActionStatus(
+                    "UNKNOWN", new UpdateActionStatusRequest("APPROVED"), ACTOR_ID))
         .isInstanceOf(ActionNotFoundException.class);
   }
 

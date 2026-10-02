@@ -10,6 +10,8 @@ import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -30,11 +32,14 @@ public class ActionController {
 
   @PostMapping("/generate")
   public ResponseEntity<GenerateActionsResponse> generateActions(
-      @Valid @RequestBody GenerateActionsRequest request) {
+      @Valid @RequestBody GenerateActionsRequest request, @AuthenticationPrincipal Jwt jwt) {
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(
             actionService.generateActions(
-                request.flowId(), request.promotionValidFrom(), request.promotionValidUntil()));
+                request.flowId(),
+                request.promotionValidFrom(),
+                request.promotionValidUntil(),
+                authenticatedUserId(jwt)));
   }
 
   @GetMapping
@@ -47,7 +52,13 @@ public class ActionController {
 
   @PatchMapping("/{id}/status")
   public ActionStatusResponse updateActionStatus(
-      @PathVariable("id") String id, @Valid @RequestBody UpdateActionStatusRequest request) {
-    return actionService.updateActionStatus(id, request);
+      @PathVariable("id") String id,
+      @Valid @RequestBody UpdateActionStatusRequest request,
+      @AuthenticationPrincipal Jwt jwt) {
+    return actionService.updateActionStatus(id, request, authenticatedUserId(jwt));
+  }
+
+  private long authenticatedUserId(Jwt jwt) {
+    return Long.parseLong(jwt.getSubject());
   }
 }

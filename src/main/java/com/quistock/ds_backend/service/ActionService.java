@@ -31,12 +31,8 @@ public class ActionService {
     this.actionRepository = actionRepository;
   }
 
-  public GenerateActionsResponse generateActions(String flowId) {
-    return generateActions(flowId, null, null);
-  }
-
   public GenerateActionsResponse generateActions(
-      String flowId, LocalDate promotionValidFrom, LocalDate promotionValidUntil) {
+      String flowId, LocalDate promotionValidFrom, LocalDate promotionValidUntil, long actorId) {
     FlowDTO flow = flowService.findFlowById(flowId);
     ActionRule rule = FLOW_ACTIONS.get(flow.flowType());
     if (rule == null) {
@@ -52,7 +48,12 @@ public class ActionService {
         rule.actionType(), promotionValidFrom, promotionValidUntil, true);
     ActionDTO action =
         actionRepository.createGenerated(
-            flow, rule.actionType(), rule.justification(), promotionValidFrom, promotionValidUntil);
+            flow,
+            rule.actionType(),
+            rule.justification(),
+            promotionValidFrom,
+            promotionValidUntil,
+            actorId);
     return new GenerateActionsResponse(flow.id(), List.of(action));
   }
 
@@ -65,19 +66,15 @@ public class ActionService {
     return actionRepository.findAll(status, actionType, flowId);
   }
 
-  public ActionStatusResponse updateActionStatus(String actionId, String status) {
-    return updateActionStatus(actionId, new UpdateActionStatusRequest(status));
-  }
-
   public ActionStatusResponse updateActionStatus(
-      String actionId, UpdateActionStatusRequest request) {
+      String actionId, UpdateActionStatusRequest request, long actorId) {
     ActionRequestValidator.validateStatus(request);
     String actionType = actionRepository.findTypeById(actionId);
     if (actionType == null) {
       throw new ActionNotFoundException(actionId);
     }
     ActionRequestValidator.validateFinalDates(actionType, request.status(), request);
-    return actionRepository.updateStatus(actionId, request);
+    return actionRepository.updateStatus(actionId, request, actorId);
   }
 
   private record ActionRule(String actionType, String justification) {}

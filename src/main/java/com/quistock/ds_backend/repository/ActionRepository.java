@@ -42,7 +42,8 @@ public class ActionRepository {
       String actionType,
       String justification,
       LocalDate promotionValidFrom,
-      LocalDate promotionValidUntil) {
+      LocalDate promotionValidUntil,
+      long actorId) {
     Long flowId = parseId(flow.id());
     if (flowId == null) {
       throw new IllegalArgumentException("The flow ID must be a persisted analysis ID.");
@@ -55,7 +56,8 @@ public class ActionRepository {
             .addValue("origin", "EMPLOYEE")
             .addValue(STATUS_PARAMETER, GENERATED)
             .addValue("promotionValidFrom", promotionValidFrom)
-            .addValue("promotionValidUntil", promotionValidUntil);
+            .addValue("promotionValidUntil", promotionValidUntil)
+            .addValue("actorId", actorId);
     List<Long> insertedIds =
         jdbc.query(
             """
@@ -71,7 +73,7 @@ public class ActionRepository {
                    :promotionValidFrom, :promotionValidUntil,
                    CASE WHEN CAST(:actionType AS suggestion_type) = 'PROMOTION'
                      THEN ps.sale_price ELSE NULL END,
-                   NULL, TRUE
+                   :actorId, TRUE
             FROM product_analysis pa
             JOIN product_store ps
               ON ps.product_id = pa.product_id AND ps.store_id = pa.store_id
@@ -89,7 +91,13 @@ public class ActionRepository {
     }
     if (!insertedIds.isEmpty()) {
       auditRepository.logGenerated(
-          suggestionId, actionType, flowId, promotionValidFrom, promotionValidUntil, justification);
+          suggestionId,
+          actionType,
+          flowId,
+          actorId,
+          promotionValidFrom,
+          promotionValidUntil,
+          justification);
     }
     return readRepository.findActionById(suggestionId);
   }
@@ -108,7 +116,8 @@ public class ActionRepository {
   }
 
   @Transactional
-  public ActionStatusResponse updateStatus(String actionId, UpdateActionStatusRequest request) {
+  public ActionStatusResponse updateStatus(
+      String actionId, UpdateActionStatusRequest request, long actorId) {
     Long id = parseId(actionId);
     if (id == null) {
       throw new ActionNotFoundException(actionId);
@@ -137,11 +146,17 @@ public class ActionRepository {
             ? current.validUntil()
             : request.finalPromotionValidUntil();
     updateStatusRow(id, request.status(), validFrom, validUntil);
-    decisionRepository.updateTriageIfNeeded(id, request.status());
+    decisionRepository.updateTriageIfNeeded(id, request.status(), actorId);
     decisionRepository.updateDecisionIfNeeded(
-        id, request.status(), request.justification(), validFrom, validUntil);
+        id, request.status(), request.justification(), validFrom, validUntil, actorId);
     auditRepository.logStatusChanged(
-        id, current.status(), request.status(), validFrom, validUntil, request.justification());
+        id,
+        actorId,
+        current.status(),
+        request.status(),
+        validFrom,
+        validUntil,
+        request.justification());
     return new ActionStatusResponse(actionId, request.status(), validFrom, validUntil);
   }
 

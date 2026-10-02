@@ -28,7 +28,7 @@ class ChatServiceTest {
     when(flowService.listFlows()).thenReturn(List.of(flow("101", "LOW"), flow("102", "HIGH")));
 
     ChatResponse response =
-        chatService.answer(new ChatRequest("1", "Which products need a promotion?"));
+        chatService.answer(new ChatRequest("Which products need a promotion?"));
 
     assertThat(response.responsibleAgent()).isEqualTo("operations_agent");
     assertThat(response.answer()).contains("promotion for Whole Milk 1L");
@@ -48,7 +48,7 @@ class ChatServiceTest {
     when(flowService.listFlows()).thenReturn(List.of(flow("101", "HIGH")));
 
     ChatResponse response =
-        chatService.answer(new ChatRequest("1", "Which products are out of stock?"));
+        chatService.answer(new ChatRequest("Which products are out of stock?"));
 
     assertThat(response.answer()).contains("stock order for Whole Milk 1L");
     assertThat(response.referencedData())
@@ -62,7 +62,7 @@ class ChatServiceTest {
     when(flowService.listFlows()).thenReturn(List.of(flow("101", "MEDIUM")));
 
     ChatResponse response =
-        chatService.answer(new ChatRequest("1", "Which products need a promotion?"));
+        chatService.answer(new ChatRequest("Which products need a promotion?"));
 
     assertThat(response.answer()).isEqualTo("No analyzed products match the requested criteria.");
     assertThat(response.referencedData()).isEmpty();

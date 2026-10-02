@@ -9,6 +9,7 @@ import java.util.Objects;
 
 final class ErpIdentifiers {
   private static final int MAX_ID_LENGTH = 150;
+  private static final int MAX_SKU_LENGTH = 100;
   private static final String CATEGORY_PREFIX = "category:";
 
   private ErpIdentifiers() {}
@@ -45,6 +46,15 @@ final class ErpIdentifiers {
       throw new IllegalArgumentException("The ERP record is missing " + field + ".");
     }
     return cleaned;
+  }
+
+  static String productSku(String productErpId) {
+    String sku = required(productErpId, "product code");
+    if (sku.length() > MAX_SKU_LENGTH) {
+      throw new IllegalArgumentException(
+          "The ERP product code used as SKU exceeds " + MAX_SKU_LENGTH + " characters.");
+    }
+    return sku;
   }
 
   static String storeId(ErpBatchDTO batch) {

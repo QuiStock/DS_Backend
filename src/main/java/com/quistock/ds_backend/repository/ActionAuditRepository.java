@@ -32,6 +32,7 @@ class ActionAuditRepository {
       long suggestionId,
       String actionType,
       long flowId,
+      long userId,
       LocalDate validFrom,
       LocalDate validUntil,
       String justification) {
@@ -40,6 +41,7 @@ class ActionAuditRepository {
         new LogData(
             GENERATED,
             GENERATED,
+            userId,
             validFrom,
             validUntil,
             justification,
@@ -59,6 +61,7 @@ class ActionAuditRepository {
 
   void logStatusChanged(
       long suggestionId,
+      long userId,
       String currentStatus,
       String status,
       LocalDate validFrom,
@@ -69,6 +72,7 @@ class ActionAuditRepository {
         new LogData(
             eventFor(status),
             status,
+            userId,
             validFrom,
             validUntil,
             justification,
@@ -87,13 +91,14 @@ class ActionAuditRepository {
           discount_percentage, promotional_price, valid_from, valid_until,
           previous_data, new_data, reason, occurred_at
         ) VALUES (
-          :suggestionId, NULL, CAST(:event AS suggestion_log_event), :status,
+          :suggestionId, :userId, CAST(:event AS suggestion_log_event), :status,
           NULL, NULL, NULL, :validFrom, :validUntil,
           CAST(:previousData AS jsonb), CAST(:newData AS jsonb), :reason, CURRENT_TIMESTAMP
         )
         """,
         new MapSqlParameterSource()
             .addValue("suggestionId", suggestionId)
+            .addValue("userId", log.userId())
             .addValue("event", log.event())
             .addValue("status", log.status())
             .addValue("validFrom", log.validFrom())
@@ -132,6 +137,7 @@ class ActionAuditRepository {
   private record LogData(
       String event,
       String status,
+      long userId,
       LocalDate validFrom,
       LocalDate validUntil,
       String reason,
