@@ -2,7 +2,6 @@ package com.quistock.ds_backend.controller;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -23,14 +22,21 @@ import com.quistock.ds_backend.model.dto.UpdateActionStatusRequest;
 import com.quistock.ds_backend.service.ActionService;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.MethodParameter;
 import org.springframework.http.MediaType;
-import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.bind.support.WebDataBinderFactory;
+import org.springframework.web.context.request.NativeWebRequest;
+import org.springframework.web.method.HandlerMethodArgumentResolver;
+import org.springframework.web.method.support.ModelAndViewContainer;
 
 class ActionControllerTest {
   private static final long ACTOR_ID = 1001L;
+  private static final String JWT_REQUEST_ATTRIBUTE = "authenticatedJwt";
 
   @Test
   void shouldGenerateActionsUsingAuthenticatedUser() throws Exception {
@@ -216,12 +222,38 @@ class ActionControllerTest {
 
   private MockMvc mockMvc(ActionService actionService) {
     return MockMvcBuilders.standaloneSetup(new ActionController(actionService))
-        .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
+        .setCustomArgumentResolvers(
+            new HandlerMethodArgumentResolver() {
+              @Override
+              public boolean supportsParameter(MethodParameter parameter) {
+                return parameter.hasParameterAnnotation(AuthenticationPrincipal.class)
+                    && Jwt.class.isAssignableFrom(parameter.getParameterType());
+              }
+
+              @Override
+              public Object resolveArgument(
+                  MethodParameter parameter,
+                  ModelAndViewContainer mavContainer,
+                  NativeWebRequest webRequest,
+                  WebDataBinderFactory binderFactory) {
+                return webRequest.getAttribute(
+                    JWT_REQUEST_ATTRIBUTE, NativeWebRequest.SCOPE_REQUEST);
+              }
+            })
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
   }
 
   private RequestPostProcessor testUser() {
-    return jwt().jwt(token -> token.subject(Long.toString(ACTOR_ID)));
+    Jwt token =
+        Jwt.withTokenValue("test-token")
+            .header("alg", "RS256")
+            .subject(Long.toString(ACTOR_ID))
+            .claim("email", "mobile@test.example")
+            .build();
+    return request -> {
+      request.setAttribute(JWT_REQUEST_ATTRIBUTE, token);
+      return request;
+    };
   }
 }

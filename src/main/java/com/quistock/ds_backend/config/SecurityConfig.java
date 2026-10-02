@@ -21,6 +21,7 @@ import org.springframework.security.web.SecurityFilterChain;
 @Configuration
 public class SecurityConfig {
   @Bean
+  @SuppressWarnings("PMD.SignatureDeclareThrowsException")
   SecurityFilterChain apiSecurityFilterChain(HttpSecurity http) throws Exception {
     return http.csrf(AbstractHttpConfigurer::disable)
         .sessionManagement(
@@ -36,9 +37,7 @@ public class SecurityConfig {
       @Value("${auth.jwt.issuer}") String issuer,
       @Value("${auth.jwt.audience}") String audience) {
     NimbusJwtDecoder decoder =
-        NimbusJwtDecoder.withJwkSetUri(jwkSetUri)
-            .jwsAlgorithm(SignatureAlgorithm.RS256)
-            .build();
+        NimbusJwtDecoder.withJwkSetUri(jwkSetUri).jwsAlgorithm(SignatureAlgorithm.RS256).build();
     decoder.setJwtValidator(
         new DelegatingOAuth2TokenValidator<>(
             JwtValidators.createDefaultWithIssuer(issuer),
