@@ -28,59 +28,45 @@ class ActionAuditRepository {
     this.objectMapper = objectMapper;
   }
 
-  void logGenerated(
-      long suggestionId,
-      String actionType,
-      long flowId,
-      long userId,
-      LocalDate validFrom,
-      LocalDate validUntil,
-      String justification) {
+  void logGenerated(GeneratedLog log) {
     writeLog(
-        suggestionId,
+        log.suggestionId(),
         new LogData(
             GENERATED,
             GENERATED,
-            userId,
-            validFrom,
-            validUntil,
-            justification,
+            log.userId(),
+            log.validFrom(),
+            log.validUntil(),
+            log.justification(),
             Map.of(),
             data(
                 STATUS_KEY,
                 GENERATED,
                 "type",
-                actionType,
+                log.actionType(),
                 "flow_id",
-                flowId,
+                log.flowId(),
                 PROMOTION_FROM_KEY,
-                validFrom,
+                log.validFrom(),
                 PROMOTION_UNTIL_KEY,
-                validUntil)));
+                log.validUntil())));
   }
 
-  void logStatusChanged(
-      long suggestionId,
-      long userId,
-      String currentStatus,
-      String status,
-      LocalDate validFrom,
-      LocalDate validUntil,
-      String justification) {
+  void logStatusChanged(StatusChangedLog log) {
     writeLog(
-        suggestionId,
+        log.suggestionId(),
         new LogData(
-            eventFor(status),
-            status,
-            userId,
-            validFrom,
-            validUntil,
-            justification,
-            data(STATUS_KEY, currentStatus),
+            eventFor(log.status()),
+            log.status(),
+            log.userId(),
+            log.validFrom(),
+            log.validUntil(),
+            log.justification(),
+            data(STATUS_KEY, log.currentStatus()),
             data(
-                STATUS_KEY, status,
-                PROMOTION_FROM_KEY, validFrom,
-                PROMOTION_UNTIL_KEY, validUntil)));
+                STATUS_KEY, log.status(),
+                PROMOTION_FROM_KEY, log.validFrom(),
+                PROMOTION_UNTIL_KEY, log.validUntil())));
   }
 
   private void writeLog(long suggestionId, LogData log) {
@@ -143,4 +129,22 @@ class ActionAuditRepository {
       String reason,
       Map<String, Object> previousData,
       Map<String, Object> newData) {}
+
+  record GeneratedLog(
+      long suggestionId,
+      String actionType,
+      long flowId,
+      long userId,
+      LocalDate validFrom,
+      LocalDate validUntil,
+      String justification) {}
+
+  record StatusChangedLog(
+      long suggestionId,
+      long userId,
+      String currentStatus,
+      String status,
+      LocalDate validFrom,
+      LocalDate validUntil,
+      String justification) {}
 }
