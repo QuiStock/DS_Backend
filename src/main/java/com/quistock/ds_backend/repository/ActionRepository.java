@@ -91,13 +91,14 @@ public class ActionRepository {
     }
     if (!insertedIds.isEmpty()) {
       auditRepository.logGenerated(
-          suggestionId,
-          actionType,
-          flowId,
-          actorId,
-          promotionValidFrom,
-          promotionValidUntil,
-          justification);
+          new ActionAuditRepository.GeneratedLog(
+              suggestionId,
+              actionType,
+              flowId,
+              actorId,
+              promotionValidFrom,
+              promotionValidUntil,
+              justification));
     }
     return readRepository.findActionById(suggestionId);
   }
@@ -150,13 +151,14 @@ public class ActionRepository {
     decisionRepository.updateDecisionIfNeeded(
         id, request.status(), request.justification(), validFrom, validUntil, actorId);
     auditRepository.logStatusChanged(
-        id,
-        actorId,
-        current.status(),
-        request.status(),
-        validFrom,
-        validUntil,
-        request.justification());
+        new ActionAuditRepository.StatusChangedLog(
+            id,
+            actorId,
+            current.status(),
+            request.status(),
+            validFrom,
+            validUntil,
+            request.justification()));
     return new ActionStatusResponse(actionId, request.status(), validFrom, validUntil);
   }
 
