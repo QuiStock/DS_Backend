@@ -40,7 +40,17 @@ class DeploymentSettingsValidatorTest {
     assertThatThrownBy(() -> config.erpRestClient("", "/products", true))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("ERP_API_BASE_URL");
+  }
+
+  @Test
+  void permitsDisabledErpWithoutUrl() {
+    RestClientConfig config = new RestClientConfig();
     assertThatCode(() -> config.erpRestClient("", "/products", false)).doesNotThrowAnyException();
+  }
+
+  @Test
+  void rejectsErpPathWithHost() {
+    RestClientConfig config = new RestClientConfig();
     assertThatThrownBy(() -> config.erpRestClient("http://erp:8080", "//other-host/products", true))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("ERP_API_PRODUCTS_PATH");
