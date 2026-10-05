@@ -32,8 +32,7 @@ class ChatControllerTest {
 
     mockMvc(chatService)
         .perform(
-            post("/api/chat")
-                .contextPath("/api")
+            post("/chat")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"message\":\"Which products need a promotion?\"}"))
         .andExpect(status().isOk())
@@ -51,11 +50,7 @@ class ChatControllerTest {
     ChatService chatService = mock(ChatService.class);
 
     mockMvc(chatService)
-        .perform(
-            post("/api/chat")
-                .contextPath("/api")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{}"))
+        .perform(post("/chat").contentType(MediaType.APPLICATION_JSON).content("{}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
         .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));

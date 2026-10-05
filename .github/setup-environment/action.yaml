@@ -13,3 +13,7 @@ runs:
     - name: Grant execution permission to Gradle Wrapper
       run: chmod +x ./gradlew
       shell: bash
+
+    - name: Verify Java 25 configuration
+      run: bash scripts/check-java-version.sh
+      shell: bash

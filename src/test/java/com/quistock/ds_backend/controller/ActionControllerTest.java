@@ -49,8 +49,7 @@ class ActionControllerTest {
 
     mockMvc(actionService)
         .perform(
-            post("/api/actions/generate")
-                .contextPath("/api")
+            post("/actions/generate")
                 .with(testUser())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"flow_id\":\"101\"}"))
@@ -67,11 +66,7 @@ class ActionControllerTest {
     ActionService actionService = mock(ActionService.class);
 
     mockMvc(actionService)
-        .perform(
-            post("/api/actions/generate")
-                .contextPath("/api")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{}"))
+        .perform(post("/actions/generate").contentType(MediaType.APPLICATION_JSON).content("{}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
         .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
@@ -85,8 +80,7 @@ class ActionControllerTest {
 
     mockMvc(actionService)
         .perform(
-            post("/api/actions/generate")
-                .contextPath("/api")
+            post("/actions/generate")
                 .with(testUser())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"flow_id\":\"UNKNOWN\"}"))
@@ -109,8 +103,7 @@ class ActionControllerTest {
 
     mockMvc(actionService)
         .perform(
-            get("/api/actions")
-                .contextPath("/api")
+            get("/actions")
                 .queryParam("status", "GENERATED")
                 .queryParam("action_type", "PROMOTION")
                 .queryParam("flow_id", "101"))
@@ -130,7 +123,7 @@ class ActionControllerTest {
         .thenThrow(new InvalidRequestException());
 
     mockMvc(actionService)
-        .perform(get("/api/actions").contextPath("/api").queryParam("action_type", "DISCOUNT"))
+        .perform(get("/actions").queryParam("action_type", "DISCOUNT"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
         .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
@@ -142,7 +135,7 @@ class ActionControllerTest {
     when(actionService.listActions("ACTIVE", null, null)).thenThrow(new InvalidRequestException());
 
     mockMvc(actionService)
-        .perform(get("/api/actions").contextPath("/api").queryParam("status", "ACTIVE"))
+        .perform(get("/actions").queryParam("status", "ACTIVE"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
         .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
@@ -157,8 +150,7 @@ class ActionControllerTest {
 
     mockMvc(actionService)
         .perform(
-            patch("/api/actions/501/status")
-                .contextPath("/api")
+            patch("/actions/501/status")
                 .with(testUser())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"APPROVED\"}"))
@@ -177,8 +169,7 @@ class ActionControllerTest {
 
     mockMvc(actionService)
         .perform(
-            patch("/api/actions/UNKNOWN/status")
-                .contextPath("/api")
+            patch("/actions/UNKNOWN/status")
                 .with(testUser())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"APPROVED\"}"))
@@ -195,8 +186,7 @@ class ActionControllerTest {
 
     mockMvc(actionService)
         .perform(
-            patch("/api/actions/501/status")
-                .contextPath("/api")
+            patch("/actions/501/status")
                 .with(testUser())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"INVALID\"}"))
@@ -211,8 +201,7 @@ class ActionControllerTest {
 
     mockMvc(actionService)
         .perform(
-            patch("/api/actions/501/status")
-                .contextPath("/api")
+            patch("/actions/501/status")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\" \"}"))
         .andExpect(status().isBadRequest())

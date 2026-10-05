@@ -8,7 +8,7 @@ on:
       - main
 
 env:
-  JAVA_VERSION: "26"
+  JAVA_VERSION: "25"
 
 jobs:
   build:
@@ -80,6 +80,15 @@ jobs:
       - name: Run tests
         run: ./gradlew test
 
+      - name: Verify root test execution
+        run: python3 scripts/verify-test-results.py
+
+      - name: Test configurable context
+        run: ./gradlew test --rerun-tasks -ProutingTestContext=/migration
+
+      - name: Verify context test execution
+        run: python3 scripts/verify-test-results.py
+
       - name: Upload unit test reports
         if: always()
         uses: actions/upload-artifact@v7
@@ -138,6 +147,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: ./.github/setup-environment
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
@@ -150,3 +161,8 @@ jobs:
           context: .
           platforms: linux/arm64
           push: false
+          load: true
+          tags: quistock-runtime-test:ci
+
+      - name: Verify ARM64 Java runtime
+        run: docker run --rm --platform linux/arm64 --entrypoint java quistock-runtime-test:ci -version 2>&1 | grep -E 'version "25[.]'

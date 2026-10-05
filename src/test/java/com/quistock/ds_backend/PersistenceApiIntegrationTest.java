@@ -40,7 +40,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class PersistenceApiIntegrationTest {
   private static final long TEST_USER_ID = 1001L;
@@ -74,7 +74,8 @@ class PersistenceApiIntegrationTest {
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("spring.datasource.driver-class-name", POSTGRES::getDriverClassName);
     registry.add("spring.flyway.enabled", () -> true);
-    registry.add("server.servlet.context-path", () -> "/api");
+    registry.add(
+        "server.servlet.context-path", () -> System.getProperty("routing.test.context", ""));
     registry.add("auth.jwt.issuer", () -> TEST_ISSUER);
     registry.add("auth.jwt.audience", () -> TEST_AUDIENCE);
     registry.add(
@@ -100,14 +101,13 @@ class PersistenceApiIntegrationTest {
     seedAuthenticatedUser();
     ERP_RESPONSE.set(initialErpPayload());
 
-    JsonNode products = get("/api/products", 200);
+    JsonNode products = get("/products", 200);
     assertThat(products.size()).isEqualTo(3);
     assertThat(product("SKU-HIGH:STORE-1").path("current_stock").asInt()).isEqualTo(8);
-    assertThat(get("/api/branches", 200).size()).isEqualTo(2);
-    assertThat(get("/api/products/SKU-HIGH:STORE-1", 200).path("id").asText())
+    assertThat(get("/branches", 200).size()).isEqualTo(2);
+    assertThat(get("/products/SKU-HIGH:STORE-1", 200).path("id").asText())
         .isEqualTo("SKU-HIGH:STORE-1");
-    assertThat(get("/api/erp-integration/status", 200).path("status").asText())
-        .isEqualTo("CONNECTED");
+    assertThat(get("/erp-integration/status", 200).path("status").asText()).isEqualTo("CONNECTED");
 
     String validSnapshot = initialErpPayload();
     shouldRejectSnapshot(
@@ -125,25 +125,23 @@ class PersistenceApiIntegrationTest {
     String mediumFlowId = analyze("SKU-MEDIUM:STORE-1", "MEDIUM");
     String lowFlowId = analyze("SKU-LOW:South Branch", "LOW");
     assertThat(
-            post("/api/chat", "{\"message\":\"Which products need a promotion?\"}", 200)
+            post("/chat", "{\"message\":\"Which products need a promotion?\"}", 200)
                 .path("referenced_data")
                 .isArray())
         .isTrue();
-    assertThat(get("/api/flows?flow_type=HIGH", 200).size()).isEqualTo(1);
-    assertThat(get("/api/flows?product_id=SKU-HIGH:STORE-1&status=ANALYZED", 200).size())
-        .isEqualTo(1);
+    assertThat(get("/flows?flow_type=HIGH", 200).size()).isEqualTo(1);
+    assertThat(get("/flows?product_id=SKU-HIGH:STORE-1&status=ANALYZED", 200).size()).isEqualTo(1);
 
-    JsonNode order = post("/api/actions/generate", "{\"flow_id\":\"" + highFlowId + "\"}", 201);
+    JsonNode order = post("/actions/generate", "{\"flow_id\":\"" + highFlowId + "\"}", 201);
     JsonNode promotion =
         post(
-            "/api/actions/generate",
+            "/actions/generate",
             """
             {"flow_id":"%s","promotion_valid_from":"%s","promotion_valid_until":"%s"}
             """
                 .formatted(lowFlowId, LocalDate.now().plusDays(1), LocalDate.now().plusDays(8)),
             201);
-    JsonNode noAction =
-        post("/api/actions/generate", "{\"flow_id\":\"" + mediumFlowId + "\"}", 201);
+    JsonNode noAction = post("/actions/generate", "{\"flow_id\":\"" + mediumFlowId + "\"}", 201);
     assertThat(order.path("generated_actions").size()).isEqualTo(1);
     assertThat(promotion.path("generated_actions").size()).isEqualTo(1);
     assertThat(noAction.path("generated_actions").size()).isZero();
@@ -159,16 +157,16 @@ class PersistenceApiIntegrationTest {
 
     String orderId = order.path("generated_actions").get(0).path("id").asText();
     String promotionId = promotion.path("generated_actions").get(0).path("id").asText();
-    patch("/api/actions/" + promotionId + "/status", "{\"status\":\"IN_EMPLOYEE_TRIAGE\"}", 200);
+    patch("/actions/" + promotionId + "/status", "{\"status\":\"IN_EMPLOYEE_TRIAGE\"}", 200);
     assertThat(
             jdbc.queryForObject(
                 "SELECT employee_id FROM suggestion_triage WHERE suggestion_id = ?",
                 Long.class,
                 promotionSuggestionId))
         .isEqualTo(TEST_USER_ID);
-    patch("/api/actions/" + promotionId + "/status", "{\"status\":\"SENT_TO_MANAGER\"}", 200);
+    patch("/actions/" + promotionId + "/status", "{\"status\":\"SENT_TO_MANAGER\"}", 200);
     patch(
-        "/api/actions/" + promotionId + "/status",
+        "/actions/" + promotionId + "/status",
         """
         {"status":"APPROVED","final_promotion_valid_from":"%s","final_promotion_valid_until":"%s"}
         """
@@ -181,12 +179,12 @@ class PersistenceApiIntegrationTest {
                 promotionSuggestionId))
         .isEqualTo(TEST_USER_ID);
     patch(
-        "/api/actions/" + orderId + "/status",
+        "/actions/" + orderId + "/status",
         "{\"status\":\"REJECTED\",\"justification\":\"Demand changed\"}",
         200);
 
-    assertThat(get("/api/actions?status=APPROVED&action_type=PROMOTION", 200).size()).isEqualTo(1);
-    assertThat(get("/api/dashboard/summary", 200).isObject()).isTrue();
+    assertThat(get("/actions?status=APPROVED&action_type=PROMOTION", 200).size()).isEqualTo(1);
+    assertThat(get("/dashboard/summary", 200).isObject()).isTrue();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM suggestion_log", Integer.class))
         .isEqualTo(6);
     assertThat(
@@ -202,7 +200,7 @@ class PersistenceApiIntegrationTest {
 
     ERP_RESPONSE.set(updatedErpPayload());
     assertThat(erpSyncService.syncNow()).isTrue();
-    assertThat(get("/api/products", 200).size()).isEqualTo(1);
+    assertThat(get("/products", 200).size()).isEqualTo(1);
     assertThat(
             jdbc.queryForObject("SELECT COUNT(*) FROM batch WHERE active = FALSE", Integer.class))
         .isEqualTo(3);
@@ -210,24 +208,24 @@ class PersistenceApiIntegrationTest {
     ERP_RESPONSE.set("[]");
     assertThatThrownBy(erpSyncService::syncNow).isInstanceOf(IllegalStateException.class);
     assertThat(erpSyncService.hasCompletedSync()).isTrue();
-    assertThat(get("/api/products", 200).size()).isEqualTo(1);
+    assertThat(get("/products", 200).size()).isEqualTo(1);
   }
 
   private String analyze(String productId, String expectedType) throws Exception {
-    JsonNode flow = post("/api/flows/analyze", "{\"product_id\":\"" + productId + "\"}", 201);
+    JsonNode flow = post("/flows/analyze", "{\"product_id\":\"" + productId + "\"}", 201);
     assertThat(flow.path("flow_type").asText()).isEqualTo(expectedType);
     return flow.path("id").asText();
   }
 
   private JsonNode product(String publicId) throws Exception {
-    return get("/api/products/" + publicId, 200);
+    return get("/products/" + publicId, 200);
   }
 
   private void shouldRejectSnapshot(String payload) throws Exception {
     ERP_RESPONSE.set(payload);
     assertThatThrownBy(erpSyncService::syncNow)
         .isInstanceOf(com.quistock.ds_backend.exception.ErpIntegrationException.class);
-    assertThat(get("/api/products", 200).size()).isEqualTo(3);
+    assertThat(get("/products", 200).size()).isEqualTo(3);
   }
 
   private void seedAuthenticatedUser() {
@@ -243,7 +241,12 @@ class PersistenceApiIntegrationTest {
 
   private void assertRequestWithoutTokenIsUnauthorized() throws Exception {
     HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/products"))
+        HttpRequest.newBuilder(
+                URI.create(
+                    "http://127.0.0.1:"
+                        + port
+                        + System.getProperty("routing.test.context", "")
+                        + "/products"))
             .GET()
             .build();
     HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
@@ -252,7 +255,12 @@ class PersistenceApiIntegrationTest {
 
   private void assertRequestWithInvalidTokenIsUnauthorized() throws Exception {
     HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/products"))
+        HttpRequest.newBuilder(
+                URI.create(
+                    "http://127.0.0.1:"
+                        + port
+                        + System.getProperty("routing.test.context", "")
+                        + "/products"))
             .header("Authorization", "Bearer invalid-token")
             .GET()
             .build();
@@ -299,7 +307,12 @@ class PersistenceApiIntegrationTest {
 
   private void assertUnauthorized(String token) throws Exception {
     HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/products"))
+        HttpRequest.newBuilder(
+                URI.create(
+                    "http://127.0.0.1:"
+                        + port
+                        + System.getProperty("routing.test.context", "")
+                        + "/products"))
             .header("Authorization", "Bearer " + token)
             .GET()
             .build();
@@ -322,7 +335,12 @@ class PersistenceApiIntegrationTest {
   private JsonNode exchange(HttpMethod method, String path, String body, int expectedStatus)
       throws Exception {
     HttpRequest.Builder request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
+        HttpRequest.newBuilder(
+                URI.create(
+                    "http://127.0.0.1:"
+                        + port
+                        + System.getProperty("routing.test.context", "")
+                        + path))
             .header("Authorization", "Bearer " + validToken());
     if (body == null) {
       request.GET();

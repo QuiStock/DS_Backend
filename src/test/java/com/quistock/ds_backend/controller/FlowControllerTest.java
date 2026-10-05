@@ -31,8 +31,7 @@ class FlowControllerTest {
 
     mockMvc(flowService)
         .perform(
-            post("/api/flows/analyze")
-                .contextPath("/api")
+            post("/flows/analyze")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":\"PROD001:FIL001\"}"))
         .andExpect(status().isCreated())
@@ -50,11 +49,7 @@ class FlowControllerTest {
     FlowService flowService = mock(FlowService.class);
 
     mockMvc(flowService)
-        .perform(
-            post("/api/flows/analyze")
-                .contextPath("/api")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{}"))
+        .perform(post("/flows/analyze").contentType(MediaType.APPLICATION_JSON).content("{}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
         .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
@@ -66,8 +61,7 @@ class FlowControllerTest {
 
     mockMvc(flowService)
         .perform(
-            post("/api/flows/analyze")
-                .contextPath("/api")
+            post("/flows/analyze")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":"))
         .andExpect(status().isBadRequest())
@@ -82,8 +76,7 @@ class FlowControllerTest {
 
     mockMvc(flowService)
         .perform(
-            get("/api/flows")
-                .contextPath("/api")
+            get("/flows")
                 .queryParam("flow_type", "LOW")
                 .queryParam("product_id", "PROD001:FIL001")
                 .queryParam("status", "ANALYZED"))
@@ -101,7 +94,7 @@ class FlowControllerTest {
     when(flowService.listFlows("URGENT", null, null)).thenThrow(new InvalidRequestException());
 
     mockMvc(flowService)
-        .perform(get("/api/flows").contextPath("/api").queryParam("flow_type", "URGENT"))
+        .perform(get("/flows").queryParam("flow_type", "URGENT"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
         .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
@@ -113,7 +106,7 @@ class FlowControllerTest {
     when(flowService.listFlows(null, null, "PENDING")).thenThrow(new InvalidRequestException());
 
     mockMvc(flowService)
-        .perform(get("/api/flows").contextPath("/api").queryParam("status", "PENDING"))
+        .perform(get("/flows").queryParam("status", "PENDING"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
         .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));
@@ -126,8 +119,7 @@ class FlowControllerTest {
 
     mockMvc(flowService)
         .perform(
-            post("/api/flows/analyze")
-                .contextPath("/api")
+            post("/flows/analyze")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":\"UNKNOWN\"}"))
         .andExpect(status().isNotFound())
@@ -144,8 +136,7 @@ class FlowControllerTest {
 
     mockMvc(flowService)
         .perform(
-            post("/api/flows/analyze")
-                .contextPath("/api")
+            post("/flows/analyze")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":\"PROD001:FIL001\"}"))
         .andExpect(status().isServiceUnavailable())
