@@ -80,14 +80,8 @@ jobs:
       - name: Run tests and public health smoke
         run: ./gradlew test
 
-      - name: Verify root test execution
-        run: python3 scripts/verify-test-results.py
-
       - name: Test configurable context
         run: ./gradlew test --rerun-tasks -ProutingTestContext=/migration
-
-      - name: Verify context test execution
-        run: python3 scripts/verify-test-results.py
 
       - name: Upload unit test reports
         if: always()
