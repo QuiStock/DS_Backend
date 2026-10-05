@@ -15,5 +15,11 @@ runs:
       shell: bash
 
     - name: Verify Java 25 configuration
-      run: bash scripts/check-java-version.sh
       shell: bash
+      run: |
+        test "$JAVA_VERSION" = "25"
+        grep -Eq 'languageVersion *= *JavaLanguageVersion.of\(25\)' build.gradle
+        grep -Eq 'vendor *= *JvmVendorSpec.ADOPTIUM' build.gradle
+        test "$(grep -Ec '^FROM eclipse-temurin:25-(jdk|jre)-noble AS (build|runtime) Dockerfile)" = "2"
+        java -version
+        ./gradlew --version
