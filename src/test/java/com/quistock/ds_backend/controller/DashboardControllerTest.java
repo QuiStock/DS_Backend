@@ -25,7 +25,7 @@ class DashboardControllerTest {
         .thenReturn(new DashboardSummaryDTO(5, 1, 2, 2, 3, 2, 1, 4, 2, 3, 5));
 
     mockMvc(dashboardService)
-        .perform(get("/api/dashboard/summary").contextPath("/api"))
+        .perform(get("/dashboard/summary"))
         .andExpect(status().isOk())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.total_products").value(5))
@@ -50,7 +50,7 @@ class DashboardControllerTest {
                 "Could not connect to the external ERP API.", new RuntimeException()));
 
     mockMvc(dashboardService)
-        .perform(get("/api/dashboard/summary").contextPath("/api"))
+        .perform(get("/dashboard/summary"))
         .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.error").value("ERP_UNAVAILABLE"));
   }

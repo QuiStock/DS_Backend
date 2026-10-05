@@ -30,7 +30,7 @@ class ProductControllerTest {
     MockMvc mockMvc = createMockMvc(productService);
 
     mockMvc
-        .perform(get("/api/products").contextPath("/api"))
+        .perform(get("/products"))
         .andExpect(status().isOk())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$[0].id").value("PROD001:FIL001"))
@@ -46,8 +46,7 @@ class ProductControllerTest {
 
     createMockMvc(productService)
         .perform(
-            get("/api/products")
-                .contextPath("/api")
+            get("/products")
                 .queryParam("branch", "Santana Store")
                 .queryParam("category", "Dairy")
                 .queryParam("status", "true"))
@@ -66,7 +65,7 @@ class ProductControllerTest {
     MockMvc mockMvc = createMockMvc(productService);
 
     mockMvc
-        .perform(get("/api/products").contextPath("/api"))
+        .perform(get("/products"))
         .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.error").value("ERP_UNAVAILABLE"))
         .andExpect(jsonPath("$.message").value("Could not connect to the external ERP API."));
@@ -80,7 +79,7 @@ class ProductControllerTest {
     MockMvc mockMvc = createMockMvc(productService);
 
     mockMvc
-        .perform(get("/api/products/PROD001:FIL001").contextPath("/api"))
+        .perform(get("/products/PROD001:FIL001"))
         .andExpect(status().isOk())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.id").value("PROD001:FIL001"))
@@ -96,7 +95,7 @@ class ProductControllerTest {
     MockMvc mockMvc = createMockMvc(productService);
 
     mockMvc
-        .perform(get("/api/products/UNKNOWN").contextPath("/api"))
+        .perform(get("/products/UNKNOWN"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.error").value("PRODUCT_NOT_FOUND"))
         .andExpect(jsonPath("$.message").value("Product was not found for the provided ID."));
@@ -111,7 +110,7 @@ class ProductControllerTest {
                 "Could not connect to the external ERP API.", new RuntimeException()));
 
     createMockMvc(productService)
-        .perform(get("/api/products/PROD001:FIL001").contextPath("/api"))
+        .perform(get("/products/PROD001:FIL001"))
         .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.error").value("ERP_UNAVAILABLE"));
   }
@@ -121,7 +120,7 @@ class ProductControllerTest {
     ProductService productService = mock(ProductService.class);
 
     createMockMvc(productService)
-        .perform(get("/api/products").contextPath("/api").queryParam("status", "active"))
+        .perform(get("/products").queryParam("status", "active"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
         .andExpect(jsonPath("$.message").value("Required fields are missing or invalid."));

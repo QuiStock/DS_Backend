@@ -15,7 +15,8 @@ description = 'DS_Backend'
 
 java {
 	toolchain {
-		languageVersion = JavaLanguageVersion.of(17)
+		languageVersion = JavaLanguageVersion.of(25)
+        vendor = JvmVendorSpec.ADOPTIUM
 	}
 }
 
@@ -46,6 +47,8 @@ dependencies {
 
 test {
 	useJUnitPlatform()
+	systemProperty 'routing.test.context', providers.gradleProperty('routingTestContext').getOrElse('')
+	doFirst { logger.lifecycle('Test JVM: {}', javaLauncher.get().metadata.installationPath) }
 }
 
 pmd {

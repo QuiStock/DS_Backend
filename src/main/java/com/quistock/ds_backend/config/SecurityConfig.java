@@ -36,6 +36,9 @@ public class SecurityConfig {
       @Value("${auth.jwt.jwk-set-uri}") String jwkSetUri,
       @Value("${auth.jwt.issuer}") String issuer,
       @Value("${auth.jwt.audience}") String audience) {
+    DeploymentSettingsValidator.requireHttpUrl("AUTH_JWT_JWK_SET_URI", jwkSetUri);
+    DeploymentSettingsValidator.requireHttpUrl("AUTH_JWT_ISSUER", issuer);
+    DeploymentSettingsValidator.requireAudience(audience);
     NimbusJwtDecoder decoder =
         NimbusJwtDecoder.withJwkSetUri(jwkSetUri).jwsAlgorithm(SignatureAlgorithm.RS256).build();
     decoder.setJwtValidator(

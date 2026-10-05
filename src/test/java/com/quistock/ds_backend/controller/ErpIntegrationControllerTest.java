@@ -28,7 +28,7 @@ class ErpIntegrationControllerTest {
                 "MockAPI", "CONNECTED", Instant.parse("2026-08-28T12:00:00Z")));
 
     mockMvc(erpIntegrationService)
-        .perform(get("/api/erp-integration/status").contextPath("/api"))
+        .perform(get("/erp-integration/status"))
         .andExpect(status().isOk())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.source").value("MockAPI"))
@@ -45,7 +45,7 @@ class ErpIntegrationControllerTest {
                 "Could not connect to the external ERP API.", new RuntimeException()));
 
     mockMvc(erpIntegrationService)
-        .perform(get("/api/erp-integration/status").contextPath("/api"))
+        .perform(get("/erp-integration/status"))
         .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.error").value("ERP_UNAVAILABLE"));
   }

@@ -7,7 +7,7 @@ Last updated: 2026-10-01
 
 Local:
 
-`http://localhost:8080/api`
+`http://localhost:8080`
 
 ---
 

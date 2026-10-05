@@ -27,7 +27,7 @@ class BranchControllerTest {
             List.of(new BranchDTO("FIL001", "Santana Store", null, null, null, null, null)));
 
     mockMvc(branchService)
-        .perform(get("/api/branches").contextPath("/api"))
+        .perform(get("/branches"))
         .andExpect(status().isOk())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$[0].id").value("FIL001"))
@@ -43,7 +43,7 @@ class BranchControllerTest {
                 "Could not connect to the external ERP API.", new RuntimeException()));
 
     mockMvc(branchService)
-        .perform(get("/api/branches").contextPath("/api"))
+        .perform(get("/branches"))
         .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.error").value("ERP_UNAVAILABLE"))
         .andExpect(jsonPath("$.message").value("Could not connect to the external ERP API."));
