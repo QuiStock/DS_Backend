@@ -52,7 +52,7 @@ public class BackendDependencyHealthIndicator extends DependencyHealthIndicator 
   @Override
   protected boolean dependenciesAvailable() throws IOException, InterruptedException, ParseException {
     sql.queryForObject("SELECT 1", Integer.class);
-    HttpResponse<String> jwks = get(jwksUri, HttpResponse.BodyHandlers.ofString());
+    var jwks = get(jwksUri, HttpResponse.BodyHandlers.ofString());
     if (jwks.statusCode() != 200 || !hasUsableSigningKey(JWKSet.parse(jwks.body()))) {
       return false;
     }
