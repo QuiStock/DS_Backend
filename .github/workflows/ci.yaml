@@ -77,7 +77,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/setup-environment
 
-      - name: Run tests
+      - name: Run tests and public health smoke
         run: ./gradlew test
 
       - name: Verify root test execution

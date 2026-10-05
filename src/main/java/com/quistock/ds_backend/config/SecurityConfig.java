@@ -3,6 +3,7 @@ package com.quistock.ds_backend.config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -26,7 +27,13 @@ public class SecurityConfig {
     return http.csrf(AbstractHttpConfigurer::disable)
         .sessionManagement(
             session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-        .authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
+        .authorizeHttpRequests(
+            requests ->
+                requests
+                    .requestMatchers(HttpMethod.GET, "/health")
+                    .permitAll()
+                    .anyRequest()
+                    .authenticated())
         .oauth2ResourceServer(resourceServer -> resourceServer.jwt(Customizer.withDefaults()))
         .build();
   }

@@ -50,10 +50,35 @@ credenciais de banco e configurações JWT. ERP exige `ERP_API_BASE_URL` HTTP(S)
 `ERP_SYNC_ENABLED=true`; `ERP_API_PRODUCTS_PATH` é um path absoluto (padrão `/products`).
 O exemplo local espera um ERP em `http://localhost:8091`; os testes usam fixture HTTP local.
 
-Smoke funcional: `python scripts/smoke-routing.py`. Configure `SMOKE_AUTH_BASE_URL`,
-`SMOKE_BACKEND_BASE_URL`, `SMOKE_EMAIL`, `SMOKE_PASSWORD` e `SMOKE_PLATFORM` (padrão `mobile`).
-As bases incluem somente os prefixos públicos efetivamente usados. Execute com acesso
-direto e depois com um gateway que remova os prefixos, usando o mesmo artefato.
-O smoke cobre JWKS, login, consulta autenticada, refresh e logout sem imprimir tokens.
-Health/probes e rollout serão tratados na entrega de health e no Infra.
 Promova imagem e configuração de roteamento juntas; o rollback deve restaurar ambas.
+
+## Health público
+
+`GET /health` dispensa autenticação e retorna apenas `{"status":"UP"}` (HTTP 200)
+ou `{"status":"DOWN"}` (HTTP 503). O contexto configurado se aplica à rota; o gateway
+pode acrescentar/remover o prefixo público. Nenhum outro endpoint Actuator é exposto.
+É readiness, não liveness: uma dependência indisponível deve retirar a instância do
+tráfego, sem provocar reinícios em cascata.
+
+Cada requisição verifica as dependências novamente, sem cache de resultados. O limite
+total é `HEALTH_TIMEOUT_MS` (4000 ms por padrão, máximo 30000). Há no máximo duas
+verificações simultâneas por instância; saturação também retorna 503. SQL usa timeout
+de query de dois segundos. Uma operação de driver que não respeite interrupção pode
+continuar até o timeout do próprio driver, mas a resposta HTTP não espera por ela.
+
+Auth verifica as permissões de leitura das tabelas de autenticação no PostgreSQL,
+um primary MongoDB de replica set e uma leitura em transação na coleção de refresh.
+Não emite tokens nem altera dados. Backend verifica SQL, busca diretamente o JWKS
+configurado e exige uma chave pública RSA utilizável para RS256, além de uma leitura
+HTTP do ERP. As chamadas HTTP têm timeout de dois segundos e não seguem redirects.
+`HEALTH_ERP_REQUIRED=true` é o padrão, independente de `ERP_SYNC_ENABLED`. Use false
+somente em um deployment cujas funcionalidades realmente não dependam do ERP.
+
+O CI inclui os testes HTTP de health nas execuções em raiz e em `/migration`.
+Os cenários negativos de dependências e timeout também entram na suíte Java.
+
+Smoke de ambiente a executar posteriormente: consultar a rota sem token, exigir 200 com dependências disponíveis e
+503 ao interromper individualmente SQL, MongoDB, JWKS ou ERP necessário. Restaurar
+cada dependência deve recuperar 200. Repetir pelo gateway e com contexto configurado.
+JWT em cache não deve mascarar falha do JWKS. Complementar o health com login,
+refresh, logout e consulta autenticada para validar o contrato funcional completo.
