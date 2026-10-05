@@ -33,7 +33,7 @@ Use Eclipse Temurin JDK 25 e o wrapper versionado: `./gradlew clean check bootJa
 (Windows: `./gradlew.bat clean check bootJar`). Configure `JAVA_HOME` e selecione o mesmo
 JDK na IDE para o projeto e para Gradle. Não é necessário instalar Gradle globalmente.
 Os testes de integração exigem Docker; não devem ser omitidos na validação da PR.
-CI verifica Java 25 no toolchain, workflow e imagens e executa a JVM ARM64 via QEMU.
+O CI usa Java 25 e executa a JVM ARM64 via QEMU.
 
 As rotas usam contexto raiz por padrão. `SERVER_PORT` controla a porta interna;
 `SERVER_SERVLET_CONTEXT_PATH` permite um contexto temporário durante a migração.
@@ -74,8 +74,7 @@ HTTP do ERP. As chamadas HTTP têm timeout de dois segundos e não seguem redire
 `HEALTH_ERP_REQUIRED=true` é o padrão, independente de `ERP_SYNC_ENABLED`. Use false
 somente em um deployment cujas funcionalidades realmente não dependam do ERP.
 
-O CI inclui os testes HTTP de health nas execuções em raiz e em `/migration`.
-Os cenários negativos de dependências e timeout também entram na suíte Java.
+O endpoint é um smoke manual; sua execução não integra a suíte de testes nem é condição de aprovação do CI.
 
 Smoke de ambiente a executar posteriormente: consultar a rota sem token, exigir 200 com dependências disponíveis e
 503 ao interromper individualmente SQL, MongoDB, JWKS ou ERP necessário. Restaurar

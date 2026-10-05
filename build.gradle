@@ -16,7 +16,6 @@ description = 'DS_Backend'
 java {
 	toolchain {
 		languageVersion = JavaLanguageVersion.of(25)
-        vendor = JvmVendorSpec.ADOPTIUM
 	}
 }
 

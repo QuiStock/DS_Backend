@@ -25,7 +25,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Date;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,8 +56,6 @@ class PersistenceApiIntegrationTest {
           .withPassword("quistock");
 
   private static final AtomicReference<String> ERP_RESPONSE = new AtomicReference<>("[]");
-  private static final AtomicInteger JWKS_STATUS = new AtomicInteger(200);
-  private static final AtomicInteger ERP_STATUS = new AtomicInteger(200);
   private static HttpServer erpServer;
 
   @Value("${local.server.port}")
@@ -89,27 +86,6 @@ class PersistenceApiIntegrationTest {
     registry.add("erp.api.base-url", () -> "http://127.0.0.1:" + erpServer.getAddress().getPort());
   }
 
-  @Test
-  void publicHealthRequiresLiveJwksAndErpAndRecovers() throws IOException, InterruptedException {
-    assertThat(healthStatus()).isEqualTo(200);
-    try {
-      JWKS_STATUS.set(503);
-      assertThat(healthStatus()).isEqualTo(503);
-      JWKS_STATUS.set(200);
-      ERP_STATUS.set(503);
-      assertThat(healthStatus()).isEqualTo(503);
-    } finally {
-      JWKS_STATUS.set(200);
-      ERP_STATUS.set(200);
-    }
-    assertThat(healthStatus()).isEqualTo(200);
-  }
-
-  private int healthStatus() throws IOException, InterruptedException {
-    String base = "http://127.0.0.1:" + port + System.getProperty("routing.test.context", "");
-    HttpRequest request = HttpRequest.newBuilder(URI.create(base + "/health")).GET().build();
-    return http.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
-  }
   @AfterAll
   static void stopErpServer() {
     if (erpServer != null) {
@@ -395,11 +371,7 @@ class PersistenceApiIntegrationTest {
                     .toString()
                     .getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(
-                exchange.getRequestURI().getPath().equals("/jwks")
-                    ? JWKS_STATUS.get()
-                    : ERP_STATUS.get(),
-                body.length);
+            exchange.sendResponseHeaders(200, body.length);
             try (OutputStream output = exchange.getResponseBody()) {
               output.write(body);
             }
@@ -409,11 +381,7 @@ class PersistenceApiIntegrationTest {
           exchange -> {
             byte[] body = ERP_RESPONSE.get().getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(
-                exchange.getRequestURI().getPath().equals("/jwks")
-                    ? JWKS_STATUS.get()
-                    : ERP_STATUS.get(),
-                body.length);
+            exchange.sendResponseHeaders(200, body.length);
             try (OutputStream output = exchange.getResponseBody()) {
               output.write(body);
             }

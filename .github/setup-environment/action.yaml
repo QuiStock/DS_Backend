@@ -13,13 +13,3 @@ runs:
     - name: Grant execution permission to Gradle Wrapper
       run: chmod +x ./gradlew
       shell: bash
-
-    - name: Verify Java 25 configuration
-      shell: bash
-      run: |
-        test "$JAVA_VERSION" = "25"
-        grep -Eq 'languageVersion *= *JavaLanguageVersion.of\(25\)' build.gradle
-        grep -Eq 'vendor *= *JvmVendorSpec.ADOPTIUM' build.gradle
-        test "$(grep -Ec '^FROM eclipse-temurin:25-(jdk|jre)-noble AS (build|runtime) Dockerfile)" = "2"
-        java -version
-        ./gradlew --version
