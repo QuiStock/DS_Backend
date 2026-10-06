@@ -11,6 +11,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.text.ParseException;
 import java.time.Duration;
+import java.util.Optional;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,10 +20,11 @@ import org.springframework.web.util.DefaultUriBuilderFactory;
 
 @Component("dependenciesHealthIndicator")
 public class BackendDependencyHealthIndicator extends DependencyHealthIndicator {
+  private static final int RSA_PUBLIC_KEY_MIN_USABLE_BIT_LENGTH_THRESHOLD = 2048;
   private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(2);
   private final JdbcTemplate sql;
   private final URI jwksUri;
-  private final URI erpUri;
+  private final Optional<URI> erpUri;
   private final boolean erpRequired;
   private final HttpClient http =
       HttpClient.newBuilder()
@@ -41,22 +43,27 @@ public class BackendDependencyHealthIndicator extends DependencyHealthIndicator 
     this.sql = new JdbcTemplate(dataSource);
     this.sql.setQueryTimeout(2);
     this.jwksUri = URI.create(jwksUrl);
+    this.erpRequired = erpRequired;
+
     // Match the ERP client's path semantics, retaining any base path.
     this.erpUri =
         erpBaseUrl.isBlank()
-            ? null
-            : new DefaultUriBuilderFactory(erpBaseUrl).uriString(erpProductsPath).build();
-    this.erpRequired = erpRequired;
+            ? Optional.empty()
+            : Optional.of(
+                new DefaultUriBuilderFactory(erpBaseUrl).uriString(erpProductsPath).build());
   }
 
   @Override
-  protected boolean dependenciesAvailable() throws IOException, InterruptedException, ParseException {
+  protected boolean dependenciesAvailable()
+      throws IOException, InterruptedException, ParseException {
     sql.queryForObject("SELECT 1", Integer.class);
     var jwks = get(jwksUri, HttpResponse.BodyHandlers.ofString());
     if (jwks.statusCode() != 200 || !hasUsableSigningKey(JWKSet.parse(jwks.body()))) {
       return false;
     }
-    return !erpRequired || (erpUri != null && get(erpUri, HttpResponse.BodyHandlers.discarding()).statusCode() == 200);
+    return !erpRequired
+        || (erpUri.isPresent()
+            && get(erpUri.get(), HttpResponse.BodyHandlers.discarding()).statusCode() == 200);
   }
 
   private <T> HttpResponse<T> get(URI uri, HttpResponse.BodyHandler<T> bodyHandler)
@@ -75,7 +82,8 @@ public class BackendDependencyHealthIndicator extends DependencyHealthIndicator 
     for (JWK key : keys.getKeys()) {
       if (key instanceof RSAKey rsa && isSigningKey(rsa)) {
         try {
-          if (rsa.toRSAPublicKey().getModulus().bitLength() >= 2048) {
+          if (rsa.toRSAPublicKey().getModulus().bitLength()
+              >= RSA_PUBLIC_KEY_MIN_USABLE_BIT_LENGTH_THRESHOLD) {
             return true;
           }
         } catch (JOSEException exception) {
