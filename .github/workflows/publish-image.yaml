@@ -75,7 +75,7 @@ jobs:
           if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
               raise SystemExit(f"Unexpected image digest: {digest!r}")
 
-          path = Path("infra/clusters/gke/apps/api-core/deployment.yaml")
+          path = Path("infra/clusters/us-east1/apps/api-core/deployment.yaml")
           manifest = path.read_text(encoding="utf-8")
           image = f"ghcr.io/quistock/ds-backend@{digest}"
           pattern = r"(?m)^([ \t]*image:[ \t]*)ghcr\.io/quistock/ds-backend(?:[:@])[^\s]+$"
@@ -90,7 +90,7 @@ jobs:
         with:
           path: infra
           token: ${{ secrets.INFRA_REPO_TOKEN }}
-          add-paths: clusters/gke/apps/api-core/deployment.yaml
+          add-paths: clusters/us-east1/apps/api-core/deployment.yaml
           base: main
           branch: deploy/api-core-${{ github.event.release.tag_name }}
           delete-branch: true
