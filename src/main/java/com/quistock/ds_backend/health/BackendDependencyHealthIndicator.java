@@ -12,8 +12,11 @@ import java.net.http.HttpResponse;
 import java.text.ParseException;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.health.contributor.Health;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.util.DefaultUriBuilderFactory;
@@ -54,16 +57,35 @@ public class BackendDependencyHealthIndicator extends DependencyHealthIndicator 
   }
 
   @Override
-  protected boolean dependenciesAvailable()
+  protected Health dependenciesHealth(AtomicReference<String> dependency)
       throws IOException, InterruptedException, ParseException {
+    dependency.set("database");
     sql.queryForObject("SELECT 1", Integer.class);
+    dependency.set("jwks");
     var jwks = get(jwksUri, HttpResponse.BodyHandlers.ofString());
-    if (jwks.statusCode() != 200 || !hasUsableSigningKey(JWKSet.parse(jwks.body()))) {
-      return false;
+    if (jwks.statusCode() != HttpStatus.OK.value()) {
+      return unavailable("jwks", "unexpected_http_status")
+          .withDetail("httpStatus", jwks.statusCode())
+          .build();
     }
-    return !erpRequired
-        || (erpUri.isPresent()
-            && get(erpUri.get(), HttpResponse.BodyHandlers.discarding()).statusCode() == 200);
+    if (!hasUsableSigningKey(JWKSet.parse(jwks.body()))) {
+      return unavailable("jwks", "no_usable_signing_key").build();
+    }
+    if (!erpRequired) {
+      return Health.up().build();
+    }
+    dependency.set("erp");
+    if (erpUri.isEmpty()) {
+      return unavailable("erp", "not_configured").build();
+    }
+    int erpStatus = get(erpUri.get(), HttpResponse.BodyHandlers.discarding()).statusCode();
+    return erpStatus == HttpStatus.OK.value()
+        ? Health.up().build()
+        : unavailable("erp", "unexpected_http_status").withDetail("httpStatus", erpStatus).build();
+  }
+
+  private Health.Builder unavailable(String dependency, String reason) {
+    return Health.down().withDetail("dependency", dependency).withDetail("reason", reason);
   }
 
   private <T> HttpResponse<T> get(URI uri, HttpResponse.BodyHandler<T> bodyHandler)

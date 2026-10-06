@@ -11,10 +11,12 @@ import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
+import org.springframework.boot.health.contributor.Status;
 
 /** Limits readiness latency and the number of blocked dependency checks. */
 public abstract class DependencyHealthIndicator implements HealthIndicator {
@@ -38,30 +40,41 @@ public abstract class DependencyHealthIndicator implements HealthIndicator {
 
   @Override
   public Health health() {
-    Future<Boolean> check;
+    AtomicReference<String> dependency = new AtomicReference<>("health-check");
+    Future<Health> check;
     try {
-      check = executor.submit(this::dependenciesAvailable);
+      check = executor.submit(() -> dependenciesHealth(dependency));
     } catch (RejectedExecutionException exception) {
       LOGGER.warn("Health check capacity exhausted.");
-      return Health.down().build();
+      return Health.down().withDetail("reason", "capacity_exhausted").build();
     }
     try {
-      return Boolean.TRUE.equals(check.get(timeoutMs, TimeUnit.MILLISECONDS))
-          ? Health.up().build()
-          : Health.down().build();
-    } catch (ExecutionException | TimeoutException exception) {
-      // Do not log driver messages that might contain connection URLs or credentials.
-      LOGGER.warn("Health dependency check failed or timed out.");
-      return Health.down().build();
+      Health result = check.get(timeoutMs, TimeUnit.MILLISECONDS);
+      if (Status.DOWN.equals(result.getStatus()) && LOGGER.isWarnEnabled()) {
+        LOGGER.warn("Health dependency unavailable: {}", result.getDetails());
+      }
+      return result;
+    } catch (ExecutionException exception) {
+      // Exception messages can contain connection URLs or credentials.
+      return failure(dependency.get(), "check_failed")
+          .withDetail("errorType", exception.getCause().getClass().getSimpleName())
+          .build();
+    } catch (TimeoutException exception) {
+      return failure(dependency.get(), "timeout").withDetail("timeoutMs", timeoutMs).build();
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
-      return Health.down().build();
+      return failure(dependency.get(), "interrupted").build();
     } finally {
       check.cancel(true);
     }
   }
 
-  protected abstract boolean dependenciesAvailable()
+  private Health.Builder failure(String dependency, String reason) {
+    LOGGER.warn("Health dependency unavailable: dependency={}, reason={}", dependency, reason);
+    return Health.down().withDetail("dependency", dependency).withDetail("reason", reason);
+  }
+
+  protected abstract Health dependenciesHealth(AtomicReference<String> dependency)
       throws SQLException, IOException, InterruptedException, ParseException;
 
   @PreDestroy
