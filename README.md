@@ -75,10 +75,10 @@ máximo 30000). SQL usa timeout de query de dois segundos; a obtenção de conex
 segue o timeout do pool. Trabalho bloqueado permanece compartilhado até terminar,
 sem abrir novas verificações para substituir as que ainda estão executando.
 
-Para limitar o consumo local, `.env.example` define
-`SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE=3` e
-`SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE=0`. Esses valores só se aplicam quando
-configurados no ambiente; dimensione o total de todas as réplicas, sobreposição de
+O pool PostgreSQL usa no máximo três conexões por instância e não exige um mínimo
+de conexões ociosas. `DB_POOL_MAX_SIZE` e `DB_POOL_MIN_IDLE` permitem ajustar esses
+limites; as variáveis padrão `SPRING_DATASOURCE_HIKARI_*` também podem sobrescrevê-los.
+Dimensione o total de todas as réplicas, sobreposição de
 deploys e outros clientes para caber nos slots disponíveis no PostgreSQL. Evite
 pool de uma conexão: o Flyway pode precisar de outra durante a inicialização.
 
