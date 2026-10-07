@@ -30,7 +30,8 @@ public class SecurityConfig {
         .authorizeHttpRequests(
             requests ->
                 requests
-                    .requestMatchers(HttpMethod.GET, "/health")
+                    .requestMatchers(
+                        HttpMethod.GET, "/health", "/health/liveness", "/health/readiness")
                     .permitAll()
                     .anyRequest()
                     .authenticated())
