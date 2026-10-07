@@ -54,17 +54,33 @@ Promova imagem e configuração de roteamento juntas; o rollback deve restaurar 
 
 ## Health público
 
-`GET /health` dispensa autenticação e retorna apenas `{"status":"UP"}` (HTTP 200)
-ou `{"status":"DOWN"}` (HTTP 503). O contexto configurado se aplica à rota; o gateway
-pode acrescentar/remover o prefixo público. Nenhum outro endpoint Actuator é exposto.
-É readiness, não liveness: uma dependência indisponível deve retirar a instância do
-tráfego, sem provocar reinícios em cascata.
+`GET /health` e `GET /health/readiness` dispensam autenticação e verificam SQL,
+JWKS e ERP necessário. Retornam HTTP 200 quando disponíveis e HTTP 503 quando
+indisponíveis, com status e detalhes seguros da falha. Nenhum outro endpoint
+Actuator além de health é exposto. O contexto configurado se aplica às rotas.
 
-Cada requisição verifica as dependências novamente, sem cache de resultados. O limite
-total é `HEALTH_TIMEOUT_MS` (4000 ms por padrão, máximo 30000). Há no máximo duas
-verificações simultâneas por instância; saturação também retorna 503. SQL usa timeout
-de query de dois segundos. Uma operação de driver que não respeite interrupção pode
-continuar até o timeout do próprio driver, mas a resposta HTTP não espera por ela.
+Configure a readiness probe em `/health/readiness` e a liveness probe em
+`/health/liveness`. Liveness verifica somente o estado da aplicação, sem acessar
+SQL, JWKS ou ERP; uma falha externa deve retirar a instância do tráfego, sem
+provocar reinícios em cascata. Esses endpoints ficam disponíveis após a aplicação
+iniciar; não contornam falhas de conexão durante a inicialização do Flyway.
+
+Os resultados das dependências ficam em cache por cinco segundos por padrão. Configure
+`HEALTH_CACHE_TTL` (por exemplo `10s` ou `0ms` para desativar), ou sobrescreva
+`MANAGEMENT_ENDPOINT_HEALTH_CACHE_TIME_TO_LIVE`. Uma mudança de estado pode levar
+até o TTL configurado para aparecer. Chamadas concorrentes compartilham uma única
+verificação em andamento por instância, inclusive se um chamador exceder seu timeout.
+O limite de espera de cada chamada é `HEALTH_TIMEOUT_MS` (4000 ms por padrão,
+máximo 30000). SQL usa timeout de query de dois segundos; a obtenção de conexão
+segue o timeout do pool. Trabalho bloqueado permanece compartilhado até terminar,
+sem abrir novas verificações para substituir as que ainda estão executando.
+
+Para limitar o consumo local, `.env.example` define
+`SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE=3` e
+`SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE=0`. Esses valores só se aplicam quando
+configurados no ambiente; dimensione o total de todas as réplicas, sobreposição de
+deploys e outros clientes para caber nos slots disponíveis no PostgreSQL. Evite
+pool de uma conexão: o Flyway pode precisar de outra durante a inicialização.
 
 Auth verifica as permissões de leitura das tabelas de autenticação no PostgreSQL,
 um primary MongoDB de replica set e uma leitura em transação na coleção de refresh.
@@ -74,7 +90,7 @@ HTTP do ERP. As chamadas HTTP têm timeout de dois segundos e não seguem redire
 `HEALTH_ERP_REQUIRED=true` é o padrão, independente de `ERP_SYNC_ENABLED`. Use false
 somente em um deployment cujas funcionalidades realmente não dependam do ERP.
 
-O endpoint é um smoke manual; sua execução não integra a suíte de testes nem é condição de aprovação do CI.
+A suíte verifica as probes HTTP, o cache e a concorrência com dependências controladas. O smoke do ambiente implantado continua sendo manual.
 
 Smoke de ambiente a executar posteriormente: consultar a rota sem token, exigir 200 com dependências disponíveis e
 503 ao interromper individualmente SQL, MongoDB, JWKS ou ERP necessário. Restaurar

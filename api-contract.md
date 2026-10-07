@@ -28,7 +28,7 @@ the integration boundary; all public API fields and internal code identifiers ar
 
 ## Authentication
 
-All API routes require an access token in the `Authorization` header:
+Business API routes require an access token in the `Authorization` header:
 
 ```text
 Authorization: Bearer <access_token>
@@ -650,3 +650,15 @@ Status: `400 Bad Request`
   "message": "Required fields are missing or invalid."
 }
 ```
+
+## Public health probes
+
+`GET /health` and `GET /health/readiness` require no authentication and return
+200 for available dependencies or 503 otherwise. Responses include status and
+safe diagnostic details. `GET /health/liveness` checks application availability
+without accessing PostgreSQL, JWKS or ERP. Use readiness to control traffic and
+liveness to decide restarts. Startup failures still prevent these routes from serving.
+
+Dependency results are cached for 5 seconds by default (`HEALTH_CACHE_TTL` overrides
+this duration; `0ms` disables caching). Concurrent dependency checks share in-flight
+work. Dependency state transitions may remain cached until the configured TTL expires.
