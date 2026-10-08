@@ -37,6 +37,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -50,7 +51,7 @@ class PersistenceApiIntegrationTest {
 
   @Container
   private static final PostgreSQLContainer POSTGRES =
-      new PostgreSQLContainer("postgres:17-alpine")
+      new PostgreSQLContainer(DockerImageName.parse("postgres:17"))
           .withDatabaseName("quistock_test")
           .withUsername("quistock")
           .withPassword("quistock");
@@ -105,9 +106,13 @@ class PersistenceApiIntegrationTest {
     assertThat(products.size()).isEqualTo(3);
     assertThat(product("SKU-HIGH:STORE-1").path("current_stock").asInt()).isEqualTo(8);
     assertThat(get("/branches", 200).size()).isEqualTo(2);
-    assertThat(get("/products/SKU-HIGH:STORE-1", 200).path("id").asText())
+    assertThat(get("/branches", 200).get(0).path("store_id").isNumber()).isTrue();
+    String replacementManagerId = assertUserManagementRoutes();
+    assertCookieAuthenticationAndCsrf(replacementManagerId);
+    assertThat(get("/products/SKU-HIGH:STORE-1", 200).path("id").asString())
         .isEqualTo("SKU-HIGH:STORE-1");
-    assertThat(get("/erp-integration/status", 200).path("status").asText()).isEqualTo("CONNECTED");
+    assertThat(get("/erp-integration/status", 200).path("status").asString())
+        .isEqualTo("CONNECTED");
 
     String validSnapshot = initialErpPayload();
     shouldRejectSnapshot(
@@ -120,6 +125,7 @@ class PersistenceApiIntegrationTest {
     shouldRejectSnapshot(validSnapshot.replaceFirst("\"custo\":\"[^\"]+\"", "\"custo\":null"));
     shouldRejectSnapshot(validSnapshot.replaceFirst("\"custo\":\"[^\"]+\"", "\"custo\":\"-1.00\""));
     shouldRejectSnapshot(validSnapshot.replaceFirst("SKU-HIGH", "A".repeat(101)));
+    shouldRejectSnapshot(validSnapshot.replaceFirst("REGION-NORTH", "REGION-CONFLICT"));
 
     String highFlowId = analyze("SKU-HIGH:STORE-1", "HIGH");
     String mediumFlowId = analyze("SKU-MEDIUM:STORE-1", "MEDIUM");
@@ -147,7 +153,7 @@ class PersistenceApiIntegrationTest {
     assertThat(noAction.path("generated_actions").size()).isZero();
 
     long promotionSuggestionId =
-        Long.parseLong(promotion.path("generated_actions").get(0).path("id").asText());
+        Long.parseLong(promotion.path("generated_actions").get(0).path("id").asString());
     assertThat(
             jdbc.queryForObject(
                 "SELECT created_by_id FROM suggestion WHERE id = ?",
@@ -155,8 +161,8 @@ class PersistenceApiIntegrationTest {
                 promotionSuggestionId))
         .isEqualTo(TEST_USER_ID);
 
-    String orderId = order.path("generated_actions").get(0).path("id").asText();
-    String promotionId = promotion.path("generated_actions").get(0).path("id").asText();
+    String orderId = order.path("generated_actions").get(0).path("id").asString();
+    String promotionId = promotion.path("generated_actions").get(0).path("id").asString();
     patch("/actions/" + promotionId + "/status", "{\"status\":\"IN_EMPLOYEE_TRIAGE\"}", 200);
     assertThat(
             jdbc.queryForObject(
@@ -213,8 +219,8 @@ class PersistenceApiIntegrationTest {
 
   private String analyze(String productId, String expectedType) throws Exception {
     JsonNode flow = post("/flows/analyze", "{\"product_id\":\"" + productId + "\"}", 201);
-    assertThat(flow.path("flow_type").asText()).isEqualTo(expectedType);
-    return flow.path("id").asText();
+    assertThat(flow.path("flow_type").asString()).isEqualTo(expectedType);
+    return flow.path("id").asString();
   }
 
   private JsonNode product(String publicId) throws Exception {
@@ -237,6 +243,274 @@ class PersistenceApiIntegrationTest {
         "Mobile User",
         "mobile@test.example",
         "test-hash");
+    jdbc.update(
+        "INSERT INTO user_account (id, role_id, name, email, password_hash) "
+            + "VALUES (?, (SELECT id FROM role WHERE code = 'ADMIN'), ?, ?, ?)",
+        1002L,
+        "Admin User",
+        "admin@test.example",
+        "test-hash");
+    jdbc.update(
+        "INSERT INTO user_account (id, role_id, name, email, password_hash) "
+            + "VALUES (?, (SELECT id FROM role WHERE code = 'GERENTE'), ?, ?, ?)",
+        1003L,
+        "Manager User",
+        "manager@test.example",
+        "test-hash");
+  }
+
+  private String assertUserManagementRoutes() throws Exception {
+    String adminToken = tokenFor(1002L, "admin@test.example");
+    String managerToken = tokenFor(1003L, "manager@test.example");
+
+    assertThat(getAs("/profile", 200, managerToken).path("role").asString()).isEqualTo("GERENTE");
+    assertThat(getAs("/managers", 200, adminToken).size()).isEqualTo(1);
+    assertThat(getAs("/managers/1003", 200, adminToken).path("email").asString())
+        .isEqualTo("manager@test.example");
+    getAs("/managers", 403, managerToken);
+    getAs("/regions", 200, managerToken);
+    getAs("/regions", 403, validToken());
+
+    JsonNode branches = get("/branches", 200);
+    long storeOne = branches.get(0).path("store_id").asLong();
+    long storeTwo = branches.get(1).path("store_id").asLong();
+    JsonNode employee =
+        postAs(
+            "/team-members",
+            """
+            {"name":"Store Employee","email":"employee@test.example","password":"GenericPass123",
+             "role":"FUNCIONARIO","store_id":%d}
+            """
+                .formatted(storeOne),
+            201,
+            managerToken);
+    String employeeId = employee.path("id").asString();
+    assertThat(getAs("/team-members/" + employeeId, 200, managerToken).path("id").asString())
+        .isEqualTo(employeeId);
+    assertThat(employee.path("role").asString()).isEqualTo("FUNCIONARIO");
+    assertThat(employee.has("password")).isFalse();
+    assertThat(employee.has("password_hash")).isFalse();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT password_hash LIKE '$2a$12$%%' OR password_hash LIKE '$2b$12$%%' "
+                    + "FROM user_account WHERE id = ?",
+                Boolean.class, Long.parseLong(employeeId)))
+        .isTrue();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT created_by_id FROM user_account WHERE id = ?",
+                Long.class,
+                Long.parseLong(employeeId)))
+        .isEqualTo(1003L);
+    postAs(
+        "/team-members",
+        "{\"name\":\"Missing Store\",\"email\":\"missing-store@test.example\","
+            + "\"password\":\"GenericPass123\",\"role\":\"FUNCIONARIO\"}",
+        400,
+        managerToken);
+    postAs(
+        "/team-members",
+        "{\"name\":\"Duplicate Employee\",\"email\":\"EMPLOYEE@test.example\","
+            + "\"password\":\"GenericPass123\",\"role\":\"FUNCIONARIO\",\"store_id\":"
+            + storeOne
+            + "}",
+        409,
+        managerToken);
+    postAs(
+        "/team-members",
+        "{\"name\":\"Missing Store\",\"email\":\"missing-store-id@test.example\","
+            + "\"password\":\"GenericPass123\",\"role\":\"FUNCIONARIO\",\"store_id\":999999}",
+        404,
+        managerToken);
+
+    JsonNode regions = getAs("/regions", 200, managerToken);
+    getAs("/regions", 200, adminToken);
+    assertThat(regions.size()).isEqualTo(2);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM region_type WHERE code IN ('REGION-NORTH', 'REGION-SOUTH')",
+                Integer.class))
+        .isEqualTo(2);
+    long regionId = regions.get(0).path("id").asLong();
+    JsonNode regionalManager =
+        postAs(
+            "/team-members",
+            """
+            {"name":"Regional Manager","email":"regional@test.example","password":"GenericPass123",
+             "role":"GERENTE_REGIONAL","region_id":%d}
+            """
+                .formatted(regionId),
+            201,
+            managerToken);
+    String regionalManagerId = regionalManager.path("id").asString();
+    long secondRegionId = regions.get(1).path("id").asLong();
+    assertThat(
+            patchAs(
+                    "/team-members/" + regionalManagerId,
+                    "{\"region_id\":" + secondRegionId + "}",
+                    200,
+                    managerToken)
+                .path("region_id")
+                .asLong())
+        .isEqualTo(secondRegionId);
+    postAs(
+        "/team-members",
+        """
+        {"name":"Duplicate Regional Manager","email":"regional-duplicate@test.example",
+         "password":"GenericPass123","role":"GERENTE_REGIONAL","region_id":%d}
+        """
+            .formatted(secondRegionId),
+        409,
+        managerToken);
+    postAs(
+        "/team-members",
+        "{\"name\":\"Missing Region\",\"email\":\"missing-region@test.example\","
+            + "\"password\":\"GenericPass123\",\"role\":\"GERENTE_REGIONAL\",\"region_id\":999999}",
+        404,
+        managerToken);
+    postAs(
+        "/team-members",
+        """
+        {"name":"Invalid Employee","email":"bad-assignment@test.example","password":"GenericPass123",
+         "role":"FUNCIONARIO","store_id":%d,"region_id":%d}
+        """
+            .formatted(storeOne, regionId),
+        400,
+        managerToken);
+    getAs("/team-members/1002", 404, managerToken);
+
+    patchAs("/team-members/" + employeeId, "{\"store_id\":" + storeTwo + "}", 200, managerToken);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM user_store WHERE user_id = ? AND active = TRUE",
+                Integer.class,
+                Long.parseLong(employeeId)))
+        .isEqualTo(1);
+    patchAs("/team-members/" + employeeId, "{\"status\":\"INACTIVE\"}", 200, managerToken);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM user_store WHERE user_id = ? AND active = TRUE",
+                Integer.class,
+                Long.parseLong(employeeId)))
+        .isZero();
+    patchAs(
+        "/team-members/" + employeeId,
+        "{\"status\":\"ACTIVE\",\"store_id\":" + storeTwo + "}",
+        200,
+        managerToken);
+    patchAs("/team-members/" + employeeId, "{\"status\":\"UNKNOWN\"}", 400, managerToken);
+    patchAs("/team-members/" + employeeId, "{\"role\":\"GERENTE\"}", 400, managerToken);
+
+    patchAs("/team-members/" + regionalManagerId, "{\"status\":\"INACTIVE\"}", 200, managerToken);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM region_manager_assignment WHERE user_id = ? AND active = TRUE",
+                Integer.class,
+                Long.parseLong(regionalManagerId)))
+        .isZero();
+
+    JsonNode replacement =
+        postAs(
+            "/managers",
+            """
+            {"name":"Replacement Manager","email":"replacement@test.example","password":"GenericPass123"}
+            """,
+            201,
+            adminToken);
+    String replacementId = replacement.path("id").asString();
+    assertThat(replacement.has("password_hash")).isFalse();
+    postAs(
+        "/managers",
+        """
+        {"name":"Duplicate Email","email":"REPLACEMENT@test.example","password":"GenericPass123"}
+        """,
+        409,
+        adminToken);
+    patchAs("/managers/1003", "{\"role\":\"ADMIN\"}", 400, adminToken);
+    assertThat(
+            patchAs("/managers/1003", "{\"status\":\"INACTIVE\"}", 400, adminToken)
+                .path("error")
+                .asString())
+        .isEqualTo("INVALID_REQUEST");
+    patchAs(
+        "/managers/1003",
+        "{\"status\":\"INACTIVE\",\"replacement_manager_id\":" + replacementId + "}",
+        200,
+        adminToken);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM user_account WHERE created_by_id = ?",
+                Integer.class,
+                Long.parseLong(replacementId)))
+        .isEqualTo(2);
+    getAs("/team-members", 403, managerToken);
+    getAs("/profile", 403, managerToken);
+    assertThat(
+            getAs(
+                    "/team-members",
+                    200,
+                    tokenFor(Long.parseLong(replacementId), "replacement@test.example"))
+                .size())
+        .isEqualTo(2);
+    return replacementId;
+  }
+
+  private void assertCookieAuthenticationAndCsrf(String managerId) throws Exception {
+    String managerToken = tokenFor(Long.parseLong(managerId), "replacement@test.example");
+    HttpResponse<String> csrfResponse =
+        http.send(
+            HttpRequest.newBuilder(URI.create(baseUrl() + "/csrf")).GET().build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertThat(csrfResponse.statusCode()).isEqualTo(200);
+    String token = objectMapper.readTree(csrfResponse.body()).path("token").asString();
+    String csrfCookie =
+        csrfResponse.headers().allValues("set-cookie").stream()
+            .filter(value -> value.startsWith("XSRF-TOKEN="))
+            .map(value -> value.substring(0, value.indexOf(';')))
+            .findFirst()
+            .orElseThrow();
+    String cookies = "access_token=" + managerToken + "; " + csrfCookie;
+
+    HttpResponse<String> profileResponse =
+        http.send(
+            HttpRequest.newBuilder(URI.create(baseUrl() + "/profile"))
+                .header("Cookie", cookies)
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertThat(profileResponse.statusCode()).isEqualTo(200);
+
+    HttpRequest missingCsrf =
+        HttpRequest.newBuilder(URI.create(baseUrl() + "/team-members"))
+            .header("Cookie", cookies)
+            .header("Content-Type", "application/json")
+            .POST(
+                HttpRequest.BodyPublishers.ofString(
+                    "{\"name\":\"Cookie User\",\"email\":\"cookie-user@test.example\","
+                        + "\"password\":\"GenericPass123\",\"role\":\"FUNCIONARIO\",\"store_id\":1}"))
+            .build();
+    assertThat(http.send(missingCsrf, HttpResponse.BodyHandlers.ofString()).statusCode())
+        .isEqualTo(403);
+
+    long activeStore = get("/branches", 200).get(0).path("store_id").asLong();
+    HttpRequest validCsrf =
+        HttpRequest.newBuilder(URI.create(baseUrl() + "/team-members"))
+            .header("Cookie", cookies)
+            .header("X-XSRF-TOKEN", token)
+            .header("Content-Type", "application/json")
+            .POST(
+                HttpRequest.BodyPublishers.ofString(
+                    "{\"name\":\"Cookie User\",\"email\":\"cookie-user@test.example\","
+                        + "\"password\":\"GenericPass123\",\"role\":\"FUNCIONARIO\",\"store_id\":"
+                        + activeStore
+                        + "}"))
+            .build();
+    assertThat(http.send(validCsrf, HttpResponse.BodyHandlers.ofString()).statusCode())
+        .isEqualTo(201);
+  }
+
+  private String baseUrl() {
+    return "http://127.0.0.1:" + port + System.getProperty("routing.test.context", "");
   }
 
   private void assertRequestWithoutTokenIsUnauthorized() throws Exception {
@@ -324,15 +598,35 @@ class PersistenceApiIntegrationTest {
     return exchange(HttpMethod.GET, path, null, expectedStatus);
   }
 
+  private JsonNode getAs(String path, int expectedStatus, String token) throws Exception {
+    return exchangeAs(HttpMethod.GET, path, null, expectedStatus, token);
+  }
+
   private JsonNode post(String path, String body, int expectedStatus) throws Exception {
     return exchange(HttpMethod.POST, path, body, expectedStatus);
+  }
+
+  private JsonNode postAs(String path, String body, int expectedStatus, String token)
+      throws Exception {
+    return exchangeAs(HttpMethod.POST, path, body, expectedStatus, token);
   }
 
   private JsonNode patch(String path, String body, int expectedStatus) throws Exception {
     return exchange(HttpMethod.PATCH, path, body, expectedStatus);
   }
 
+  private JsonNode patchAs(String path, String body, int expectedStatus, String token)
+      throws Exception {
+    return exchangeAs(HttpMethod.PATCH, path, body, expectedStatus, token);
+  }
+
   private JsonNode exchange(HttpMethod method, String path, String body, int expectedStatus)
+      throws Exception {
+    return exchangeAs(method, path, body, expectedStatus, validToken());
+  }
+
+  private JsonNode exchangeAs(
+      HttpMethod method, String path, String body, int expectedStatus, String token)
       throws Exception {
     HttpRequest.Builder request =
         HttpRequest.newBuilder(
@@ -341,7 +635,7 @@ class PersistenceApiIntegrationTest {
                         + port
                         + System.getProperty("routing.test.context", "")
                         + path))
-            .header("Authorization", "Bearer " + validToken());
+            .header("Authorization", "Bearer " + token);
     if (body == null) {
       request.GET();
     } else {
@@ -401,6 +695,7 @@ class PersistenceApiIntegrationTest {
         "categoria":"Dairy","num_lote":"H-1","data_validade":"%s",
         "quantidade":"3","preco":"7.90","custo":"5.20",
         "codigo_filial_erp":"STORE-1","filial":"North Branch",
+        "region_id":"REGION-NORTH",
         "certificado_qualidade":true,"data_entrada":"2026-08-20T08:00:00Z",
         "vendas_7d":"7","vendas_30d":"30","estoque_minimo":"10","lead_time_dias":"5"
       },
@@ -409,6 +704,7 @@ class PersistenceApiIntegrationTest {
         "categoria":"Dairy","num_lote":"H-2","data_validade":"%s",
         "quantidade":"5","preco":"8.10","custo":"5.40",
         "codigo_filial_erp":"STORE-1","filial":"North Branch",
+        "region_id":"REGION-NORTH",
         "certificado_qualidade":true,"data_entrada":"2026-08-21T08:00:00Z",
         "vendas_7d":"7","vendas_30d":"30","estoque_minimo":"10","lead_time_dias":"5"
       },
@@ -417,6 +713,7 @@ class PersistenceApiIntegrationTest {
         "categoria":"Cereals","num_lote":"M-1","data_validade":"%s",
         "quantidade":"50","preco":"4.50","custo":"2.70",
         "codigo_filial_erp":"STORE-1","filial":"North Branch",
+        "region_id":"REGION-NORTH",
         "certificado_qualidade":true,"data_entrada":"2026-08-22T08:00:00Z",
         "vendas_7d":"7","vendas_30d":"30","estoque_minimo":"20","lead_time_dias":"5"
       },
@@ -424,7 +721,7 @@ class PersistenceApiIntegrationTest {
         "id":"LOW-1","codigo_produto_erp":"SKU-LOW","nome_produto":"Juice",
         "categoria":"Beverages","num_lote":"L-1","data_validade":"%s",
         "quantidade":"100","preco":"3.50","custo":"1.90",
-        "filial":"South Branch","certificado_qualidade":false,
+        "filial":"South Branch","region_id":"REGION-SOUTH","certificado_qualidade":false,
         "data_entrada":"2026-08-23T08:00:00Z","vendas_7d":"0","vendas_30d":"0",
         "estoque_minimo":"20","lead_time_dias":"3"
       }
@@ -440,6 +737,7 @@ class PersistenceApiIntegrationTest {
       "categoria":"Dairy","num_lote":"H-1","data_validade":"%s",
       "quantidade":"10","preco":"8.25","custo":"5.50",
       "codigo_filial_erp":"STORE-1","filial":"North Branch",
+      "region_id":"REGION-NORTH",
       "certificado_qualidade":true,"data_entrada":"2026-08-24T08:00:00Z",
       "vendas_7d":"7","vendas_30d":"30","estoque_minimo":"10","lead_time_dias":"5"
     }]
@@ -456,12 +754,12 @@ class PersistenceApiIntegrationTest {
   }
 
   private static String validToken() {
+    return tokenFor(TEST_USER_ID, "mobile@test.example");
+  }
+
+  private static String tokenFor(long userId, String email) {
     return signedToken(
-        TEST_ISSUER,
-        TEST_AUDIENCE,
-        Long.toString(TEST_USER_ID),
-        "mobile@test.example",
-        Instant.now().plusSeconds(300));
+        TEST_ISSUER, TEST_AUDIENCE, Long.toString(userId), email, Instant.now().plusSeconds(300));
   }
 
   private static String withInvalidSignature(String token) {

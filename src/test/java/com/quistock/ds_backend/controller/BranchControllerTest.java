@@ -24,13 +24,14 @@ class BranchControllerTest {
     BranchService branchService = mock(BranchService.class);
     when(branchService.listBranches())
         .thenReturn(
-            List.of(new BranchDTO("FIL001", "Santana Store", null, null, null, null, null)));
+            List.of(new BranchDTO("FIL001", 51L, "Santana Store", null, null, null, null, null)));
 
     mockMvc(branchService)
         .perform(get("/branches"))
         .andExpect(status().isOk())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$[0].id").value("FIL001"))
+        .andExpect(jsonPath("$[0].store_id").value(51))
         .andExpect(jsonPath("$[0].name").value("Santana Store"));
   }
 

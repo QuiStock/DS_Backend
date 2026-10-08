@@ -24,7 +24,8 @@ class BranchServiceTest {
   void shouldListActiveBranchesFromTheRepository() {
     List<BranchDTO> branches =
         List.of(
-            new BranchDTO("FIL001", "Santana Store", "Rua A, 10", "Sao Paulo", "SP", null, null));
+            new BranchDTO(
+                "FIL001", 51L, "Santana Store", "Rua A, 10", "Sao Paulo", "SP", null, null));
     when(branchRepository.findActiveBranches()).thenReturn(branches);
 
     assertThat(branchService.listBranches()).containsExactlyElementsOf(branches);

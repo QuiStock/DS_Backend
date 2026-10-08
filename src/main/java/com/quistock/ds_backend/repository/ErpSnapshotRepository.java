@@ -13,6 +13,7 @@ import org.springframework.stereotype.Repository;
 class ErpSnapshotRepository {
   private static final String ERP_ID_PARAMETER = "erpId";
   private static final String SYNC_ID_PARAMETER = "syncId";
+  private static final String NAME_PARAMETER = "name";
 
   private final NamedParameterJdbcTemplate jdbc;
   private final JdbcTemplate jdbcTemplate;
@@ -30,14 +31,33 @@ class ErpSnapshotRepository {
     return count == null ? 0 : count;
   }
 
-  long upsertStore(String erpId, String name, long syncId) {
+  long upsertRegion(String regionCode, long syncId) {
+    List<Long> ids =
+        jdbc.query(
+            """
+            INSERT INTO region_type (code, name, active)
+            VALUES (:code, :name, TRUE)
+            ON CONFLICT (code) DO UPDATE SET
+              name = EXCLUDED.name,
+              active = TRUE
+            RETURNING id
+            """,
+            new MapSqlParameterSource()
+                .addValue("code", regionCode)
+                .addValue(NAME_PARAMETER, regionCode),
+            (resultSet, rowNumber) -> resultSet.getLong("id"));
+    return ids.get(0);
+  }
+
+  long upsertStore(String erpId, String name, Long regionId, long syncId) {
     List<Long> ids =
         jdbc.query(
             """
             INSERT INTO store (erp_id, name, region_id, status, created_by_id, deactivated_at, last_sync_id)
-            VALUES (:erpId, :name, NULL, 'ACTIVE', NULL, NULL, :syncId)
+            VALUES (:erpId, :name, :regionId, 'ACTIVE', NULL, NULL, :syncId)
             ON CONFLICT (erp_id) DO UPDATE SET
               name = EXCLUDED.name,
+              region_id = COALESCE(EXCLUDED.region_id, store.region_id),
               status = 'ACTIVE',
               deactivated_at = NULL,
               last_sync_id = EXCLUDED.last_sync_id
@@ -45,7 +65,8 @@ class ErpSnapshotRepository {
             """,
             new MapSqlParameterSource()
                 .addValue(ERP_ID_PARAMETER, erpId)
-                .addValue("name", name)
+                .addValue(NAME_PARAMETER, name)
+                .addValue("regionId", regionId)
                 .addValue(SYNC_ID_PARAMETER, syncId),
             (resultSet, rowNumber) -> resultSet.getLong("id"));
     return ids.get(0);
@@ -65,7 +86,7 @@ class ErpSnapshotRepository {
             """,
             new MapSqlParameterSource()
                 .addValue(ERP_ID_PARAMETER, erpId)
-                .addValue("name", name)
+                .addValue(NAME_PARAMETER, name)
                 .addValue(SYNC_ID_PARAMETER, syncId),
             (resultSet, rowNumber) -> resultSet.getLong("id"));
     return ids.get(0);
@@ -98,7 +119,7 @@ class ErpSnapshotRepository {
                 .addValue(ERP_ID_PARAMETER, erpId)
                 .addValue("sku", erpId)
                 .addValue("categoryId", categoryId)
-                .addValue("name", name)
+                .addValue(NAME_PARAMETER, name)
                 .addValue("salePrice", salePrice)
                 .addValue("minimumStock", minimumStock)
                 .addValue(SYNC_ID_PARAMETER, syncId),

@@ -20,12 +20,37 @@ snapshot. Configure o intervalo com `ERP_SYNC_FIXED_DELAY_MS` ou desative o proc
 
 O endpoint ERP atual fornece vendas agregadas de 7 e 30 dias; elas são salvas em `product_store`.
 Como ele não envia eventos de venda individuais, as tabelas `sale` e `sale_item` ficam prontas
-para uma integração ERP que disponibilize esses eventos. Todas as rotas exigem um access token
-JWT. Para as ações, `sub` deve ser o ID numérico de `user_account.id`; ele é salvo como autor no
-SQL. A API verifica a assinatura pelo JWKS, issuer, audience, validade e os claims `sub` e `email`.
+para uma integração ERP que disponibilize esses eventos. As rotas de negócio exigem um access
+token JWT. Para as ações, `sub` deve ser o ID numérico de `user_account.id`; ele é salvo como
+autor no SQL. A API verifica a assinatura pelo JWKS, issuer, audience, validade e os claims `sub`
+e `email`. Health e `GET /csrf` são públicos.
 
 O contrato da API está em [`api-contract.md`](api-contract.md), o plano da persistência atual em
 [`persistence-plan.md`](persistence-plan.md). A API de autenticação está no repositório DS_Auth.
+
+Core também mantém perfis e cadastros de usuários no PostgreSQL. `GET /profile` consulta o
+perfil pelo `sub` do JWT; ADM gerencia `/managers`; Gerente gerencia seus próprios
+`/team-members`. Senhas iniciais são armazenadas com BCrypt cost 12. DS_Auth continua responsável
+por login e sessão. Os códigos de perfil no SQL são `ADMIN`, `GERENTE`, `GERENTE_REGIONAL` e
+`FUNCIONARIO`.
+
+O token pode chegar como cookie HTTP-only `access_token` ou como Bearer token. Para mutations
+via cookie, o cliente consulta `GET /csrf` e devolve o cookie `XSRF-TOKEN` no header
+`X-XSRF-TOKEN`. Em produção, configure `COOKIE_SECURE=true` e informe origens explícitas em
+`CORS_ALLOWED_ORIGINS` separadas por vírgula; não use `*` com cookies.
+Auth e Core precisam compartilhar host/gateway ou domínio pai de cookie com `Path=/` para o
+navegador enviar o cookie de Auth nas chamadas ao Core. CORS não compartilha cookies entre hosts.
+
+A migration `V5` normaliza `REPOSITOR` para `FUNCIONARIO`, impede e-mails duplicados após
+normalização e garante uma única filial ativa por usuário. Antes de aplicá-la em uma base com
+dados, resolva e-mails que colidam após trim/lowercase, contas com mais de uma filial ativa e
+contas ativas `FUNCIONARIO`/`GERENTE_REGIONAL` sem sua atribuição obrigatória; a migration
+interrompe com erro explicativo em vez de escolher um registro arbitrariamente.
+`GET /branches` preserva `id` como código ERP e inclui `store_id` interno para associações.
+`GET /regions` é alimentada pelo `region_id` do ERP; sem nome de região no ERP, o código também
+é usado como nome inicial.
+Antes de usar `/managers`, o banco precisa conter um `ADMIN` ativo provisionado pelo processo
+seguro de bootstrap. A API não oferece cadastro público do primeiro ADM.
 
 ## Java 25 e roteamento por ambiente
 

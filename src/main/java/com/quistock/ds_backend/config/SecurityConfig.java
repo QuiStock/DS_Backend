@@ -1,30 +1,51 @@
 package com.quistock.ds_backend.config;
 
+import jakarta.servlet.http.Cookie;
+import java.util.Arrays;
+import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
-import org.springframework.security.oauth2.core.OAuth2Error;
-import org.springframework.security.oauth2.core.OAuth2TokenValidator;
-import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
-import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtValidators;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.util.matcher.RequestMatcher;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 @Configuration
 public class SecurityConfig {
   @Bean
   @SuppressWarnings("PMD.SignatureDeclareThrowsException")
-  SecurityFilterChain apiSecurityFilterChain(HttpSecurity http) throws Exception {
-    return http.csrf(AbstractHttpConfigurer::disable)
+  SecurityFilterChain apiSecurityFilterChain(
+      HttpSecurity http,
+      BearerTokenResolver cookieBearerTokenResolver,
+      CookieCsrfTokenRepository csrfTokenRepository)
+      throws Exception {
+    RequestMatcher bearerHeaderRequest =
+        request -> {
+          String authorization = request.getHeader("Authorization");
+          return authorization != null
+              && authorization.regionMatches(true, 0, "Bearer ", 0, "Bearer ".length());
+        };
+    return http.csrf(
+            csrf ->
+                csrf.csrfTokenRepository(csrfTokenRepository)
+                    .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+                    .ignoringRequestMatchers(bearerHeaderRequest))
+        .addFilterBefore(
+            new CookieCsrfProtectionFilter(csrfTokenRepository),
+            BearerTokenAuthenticationFilter.class)
+        .cors(Customizer.withDefaults())
         .sessionManagement(
             session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(
@@ -33,62 +54,69 @@ public class SecurityConfig {
                     .requestMatchers(
                         HttpMethod.GET, "/health", "/health/liveness", "/health/readiness")
                     .permitAll()
+                    .requestMatchers(HttpMethod.GET, "/csrf")
+                    .permitAll()
                     .anyRequest()
                     .authenticated())
-        .oauth2ResourceServer(resourceServer -> resourceServer.jwt(Customizer.withDefaults()))
+        .oauth2ResourceServer(
+            resourceServer ->
+                resourceServer
+                    .bearerTokenResolver(cookieBearerTokenResolver)
+                    .jwt(Customizer.withDefaults()))
         .build();
   }
 
   @Bean
-  JwtDecoder jwtDecoder(
-      @Value("${auth.jwt.jwk-set-uri}") String jwkSetUri,
-      @Value("${auth.jwt.issuer}") String issuer,
-      @Value("${auth.jwt.audience}") String audience) {
-    DeploymentSettingsValidator.requireHttpUrl("AUTH_JWT_JWK_SET_URI", jwkSetUri);
-    DeploymentSettingsValidator.requireHttpUrl("AUTH_JWT_ISSUER", issuer);
-    DeploymentSettingsValidator.requireAudience(audience);
-    NimbusJwtDecoder decoder =
-        NimbusJwtDecoder.withJwkSetUri(jwkSetUri).jwsAlgorithm(SignatureAlgorithm.RS256).build();
-    decoder.setJwtValidator(
-        new DelegatingOAuth2TokenValidator<>(
-            JwtValidators.createDefaultWithIssuer(issuer),
-            audienceValidator(audience),
-            subjectValidator(),
-            emailValidator()));
-    return decoder;
-  }
-
-  private OAuth2TokenValidator<Jwt> audienceValidator(String audience) {
-    return jwt -> {
-      var tokenAudience = jwt.getAudience();
-      return tokenAudience != null && tokenAudience.contains(audience)
-          ? OAuth2TokenValidatorResult.success()
-          : invalidToken("The access token is not intended for this API.");
-    };
-  }
-
-  private OAuth2TokenValidator<Jwt> subjectValidator() {
-    return jwt -> {
-      try {
-        return Long.parseLong(jwt.getSubject()) > 0
-            ? OAuth2TokenValidatorResult.success()
-            : invalidToken("The access token subject must be a positive SQL user ID.");
-      } catch (NumberFormatException exception) {
-        return invalidToken("The access token subject must be a positive SQL user ID.");
+  BearerTokenResolver cookieBearerTokenResolver() {
+    DefaultBearerTokenResolver headerResolver = new DefaultBearerTokenResolver();
+    return request -> {
+      String headerToken = headerResolver.resolve(request);
+      if (headerToken != null) {
+        return headerToken;
       }
+      Cookie[] cookies = request.getCookies();
+      if (cookies != null) {
+        for (Cookie cookie : cookies) {
+          if ("access_token".equals(cookie.getName()) && !cookie.getValue().isBlank()) {
+            return cookie.getValue();
+          }
+        }
+      }
+      return null;
     };
   }
 
-  private OAuth2TokenValidator<Jwt> emailValidator() {
-    return jwt -> {
-      Object emailClaim = jwt.getClaims().get("email");
-      return emailClaim instanceof String email && !email.isBlank()
-          ? OAuth2TokenValidatorResult.success()
-          : invalidToken("The access token must contain an email claim.");
-    };
+  @Bean
+  CookieCsrfTokenRepository csrfTokenRepository(
+      @Value("${app.cookie.secure:true}") boolean secureCookie) {
+    CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+    repository.setCookiePath("/");
+    repository.setCookieCustomizer(
+        cookie -> cookie.secure(secureCookie).sameSite(secureCookie ? "None" : "Lax"));
+    return repository;
   }
 
-  private OAuth2TokenValidatorResult invalidToken(String description) {
-    return OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", description, null));
+  @Bean
+  CorsConfigurationSource corsConfigurationSource(
+      @Value("${app.cors.allowed-origins:}") String configuredOrigins) {
+    List<String> origins =
+        Arrays.stream(configuredOrigins.split(","))
+            .map(String::trim)
+            .filter(origin -> !origin.isEmpty())
+            .toList();
+    if (origins.contains("*")) {
+      throw new IllegalArgumentException(
+          "CORS_ALLOWED_ORIGINS must list explicit origins when credentials are enabled.");
+    }
+    CorsConfiguration cors = new CorsConfiguration();
+    cors.setAllowedOrigins(origins);
+    cors.setAllowCredentials(true);
+    cors.setAllowedMethods(List.of("GET", "POST", "PATCH", "OPTIONS"));
+    cors.setAllowedHeaders(
+        List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE, "X-XSRF-TOKEN"));
+    cors.setMaxAge(3600L);
+    UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+    source.registerCorsConfiguration("/**", cors);
+    return source;
   }
 }

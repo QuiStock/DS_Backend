@@ -3,6 +3,7 @@ package com.quistock.ds_backend.repository;
 import com.quistock.ds_backend.model.dto.ErpBatchDTO;
 import com.quistock.ds_backend.util.ErpValueParser;
 import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Component
 class ErpSnapshotProcessor {
+  private static final int MAX_REGION_CODE_LENGTH = 50;
   private final ErpSnapshotRepository snapshotRepository;
   private final ErpSyncStateRepository stateRepository;
 
@@ -30,6 +32,7 @@ class ErpSnapshotProcessor {
     }
 
     batches.forEach(this::validateRequiredErpFields);
+    Map<String, String> regionCodesByStore = validateStoreRegionConsistency(batches);
 
     Map<ProductStoreKey, List<ErpBatchDTO>> groups =
         batches.stream()
@@ -41,7 +44,7 @@ class ErpSnapshotProcessor {
                             ErpIdentifiers.storeId(batch)),
                     LinkedHashMap::new,
                     Collectors.toList()));
-    SnapshotContext context = new SnapshotContext(syncId);
+    SnapshotContext context = new SnapshotContext(syncId, regionCodesByStore);
     groups.forEach((key, productBatches) -> persistProductStore(key, productBatches, context));
 
     int deactivated = snapshotRepository.deactivateMissing(syncId);
@@ -49,6 +52,26 @@ class ErpSnapshotProcessor {
         syncId, batches.size(), context.inserted, context.updated, deactivated);
     return new ErpSyncRepository.SyncResult(
         batches.size(), context.inserted, context.updated, deactivated);
+  }
+
+  private Map<String, String> validateStoreRegionConsistency(List<ErpBatchDTO> batches) {
+    Map<String, String> regionCodesByStore = new HashMap<>();
+    for (ErpBatchDTO batch : batches) {
+      String regionCode = ErpIdentifiers.clean(batch.regionId());
+      if (regionCode == null) {
+        continue;
+      }
+      if (regionCode.length() > MAX_REGION_CODE_LENGTH) {
+        throw new IllegalArgumentException("The ERP region_id exceeds 50 characters.");
+      }
+      String storeCode = ErpIdentifiers.storeId(batch);
+      String existing = regionCodesByStore.putIfAbsent(storeCode, regionCode);
+      if (existing != null && !existing.equals(regionCode)) {
+        throw new IllegalArgumentException(
+            "The ERP records contain conflicting region_id values for one store.");
+      }
+    }
+    return regionCodesByStore;
   }
 
   private void validateRequiredErpFields(ErpBatchDTO batch) {
@@ -73,10 +96,18 @@ class ErpSnapshotProcessor {
       ProductStoreKey key, List<ErpBatchDTO> productBatches, SnapshotContext context) {
     ErpBatchDTO firstBatch = productBatches.get(0);
     String storeName = ErpIdentifiers.required(firstBatch.branch(), "store name");
+    String regionCode = context.regionCodeForStore(key.storeErpId());
+    Long regionId =
+        regionCode == null
+            ? null
+            : context.regionId(
+                regionCode, () -> snapshotRepository.upsertRegion(regionCode, context.syncId));
     long storeId =
         context.storeId(
             key.storeErpId(),
-            () -> snapshotRepository.upsertStore(key.storeErpId(), storeName, context.syncId));
+            () ->
+                snapshotRepository.upsertStore(
+                    key.storeErpId(), storeName, regionId, context.syncId));
 
     String categoryName = ErpIdentifiers.clean(firstBatch.category());
     Long categoryId =
@@ -141,18 +172,25 @@ class ErpSnapshotProcessor {
 
   private static final class SnapshotContext {
     private final long syncId;
+    private final Map<String, String> regionCodesByStore;
     private final Map<String, Long> storeIds = new LinkedHashMap<>();
+    private final Map<String, Long> regionIds = new LinkedHashMap<>();
     private final Map<String, Long> productIds = new LinkedHashMap<>();
     private final Map<String, Long> categoryIds = new LinkedHashMap<>();
     private int inserted;
     private int updated;
 
-    private SnapshotContext(long syncId) {
+    private SnapshotContext(long syncId, Map<String, String> regionCodesByStore) {
       this.syncId = syncId;
+      this.regionCodesByStore = regionCodesByStore;
     }
 
     private long storeId(String erpId, java.util.function.LongSupplier supplier) {
       return storeIds.computeIfAbsent(erpId, ignored -> supplier.getAsLong());
+    }
+
+    private long regionId(String regionCode, java.util.function.LongSupplier supplier) {
+      return regionIds.computeIfAbsent(regionCode, ignored -> supplier.getAsLong());
     }
 
     private Long categoryId(String name, java.util.function.LongSupplier supplier) {
@@ -161,6 +199,10 @@ class ErpSnapshotProcessor {
 
     private long productId(String erpId, java.util.function.LongSupplier supplier) {
       return productIds.computeIfAbsent(erpId, ignored -> supplier.getAsLong());
+    }
+
+    private String regionCodeForStore(String storeErpId) {
+      return regionCodesByStore.get(storeErpId);
     }
   }
 }

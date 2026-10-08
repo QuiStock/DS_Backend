@@ -20,4 +20,5 @@ public record ErpBatchDTO(
     @JsonProperty("vendas_7d") Object sales7d,
     @JsonProperty("vendas_30d") Object sales30d,
     @JsonProperty("estoque_minimo") Object minimumStock,
-    @JsonProperty("lead_time_dias") Object leadTimeDays) {}
+    @JsonProperty("lead_time_dias") Object leadTimeDays,
+    @JsonProperty("region_id") String regionId) {}
