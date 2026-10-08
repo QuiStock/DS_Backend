@@ -36,8 +36,8 @@ por login e sessão. Os códigos de perfil no SQL são `ADMIN`, `GERENTE`, `GERE
 
 O token pode chegar como cookie HTTP-only `access_token` ou como Bearer token. Para mutations
 via cookie, o cliente consulta `GET /csrf` e devolve o cookie `XSRF-TOKEN` no header
-`X-XSRF-TOKEN`. Em produção, configure `COOKIE_SECURE=true` e informe origens explícitas em
-`CORS_ALLOWED_ORIGINS` separadas por vírgula; não use `*` com cookies.
+`X-XSRF-TOKEN`. Em produção, configure `COOKIE_SECURE=true`. O CORS aceita qualquer origem,
+método e header e permite credenciais; a origem da requisição é refletida na resposta.
 Auth e Core precisam compartilhar host/gateway ou domínio pai de cookie com `Path=/` para o
 navegador enviar o cookie de Auth nas chamadas ao Core. CORS não compartilha cookies entre hosts.
 

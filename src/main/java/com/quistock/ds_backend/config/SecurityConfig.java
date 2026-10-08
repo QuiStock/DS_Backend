@@ -1,12 +1,10 @@
 package com.quistock.ds_backend.config;
 
 import jakarta.servlet.http.Cookie;
-import java.util.Arrays;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -97,23 +95,12 @@ public class SecurityConfig {
   }
 
   @Bean
-  CorsConfigurationSource corsConfigurationSource(
-      @Value("${app.cors.allowed-origins:}") String configuredOrigins) {
-    List<String> origins =
-        Arrays.stream(configuredOrigins.split(","))
-            .map(String::trim)
-            .filter(origin -> !origin.isEmpty())
-            .toList();
-    if (origins.contains("*")) {
-      throw new IllegalArgumentException(
-          "CORS_ALLOWED_ORIGINS must list explicit origins when credentials are enabled.");
-    }
+  CorsConfigurationSource corsConfigurationSource() {
     CorsConfiguration cors = new CorsConfiguration();
-    cors.setAllowedOrigins(origins);
+    cors.setAllowedOriginPatterns(List.of("*"));
     cors.setAllowCredentials(true);
-    cors.setAllowedMethods(List.of("GET", "POST", "PATCH", "OPTIONS"));
-    cors.setAllowedHeaders(
-        List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE, "X-XSRF-TOKEN"));
+    cors.setAllowedMethods(List.of("*"));
+    cors.setAllowedHeaders(List.of("*"));
     cors.setMaxAge(3600L);
     UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
     source.registerCorsConfiguration("/**", cors);
