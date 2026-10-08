@@ -16,7 +16,7 @@ public class BranchRepository {
   public List<BranchDTO> findActiveBranches() {
     return jdbc.query(
         """
-        SELECT s.erp_id, s.name,
+        SELECT s.id AS store_id, s.erp_id, s.name,
                a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a.postal_code
         FROM store s
         LEFT JOIN store_address a ON a.store_id = s.id
@@ -30,6 +30,7 @@ public class BranchRepository {
           String address = joinAddress(street, number, complement);
           return new BranchDTO(
               resultSet.getString("erp_id"),
+              resultSet.getLong("store_id"),
               resultSet.getString("name"),
               address,
               resultSet.getString("city"),

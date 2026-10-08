@@ -1,7 +1,7 @@
 # QuiStock API Contract
 
-Version: 1.4.0
-Last updated: 2026-10-01
+Version: 1.5.0
+Last updated: 2026-10-07
 
 ## Base URL
 
@@ -28,14 +28,15 @@ the integration boundary; all public API fields and internal code identifiers ar
 
 ## Authentication
 
-Business API routes require an access token in the `Authorization` header:
+Business API routes accept the Auth API's `access_token` HTTP-only cookie or an access token in
+the `Authorization` header:
 
 ```text
 Authorization: Bearer <access_token>
 ```
 
-The separate authentication service is planned for another repository. This API currently
-acts as an OAuth2 resource server and accepts RS256 JWTs. It validates the token signature
+The separate DS_Auth service issues the cookie and remains responsible for login, refresh, and
+logout. Core acts as an OAuth2 resource server and accepts RS256 JWTs. It validates the token signature
 through the configured JWKS URL, as well as its issuer, audience, expiration, `sub`, and
 `email` claims. `sub` must be a
 positive numeric ID matching `user_account.id` in PostgreSQL; `email` must contain the account
@@ -44,7 +45,157 @@ email. The expected audience is `quistock-api` by default. Configure `AUTH_JWT_I
 
 Missing, invalid, or expired tokens return `401 Unauthorized`. Actor IDs written for suggestion
 creation, triage, decisions, and logs come from the authenticated `sub`, never from a request
-body. Role-based access rules are not part of the current contract.
+body. Core looks up the active account and role in PostgreSQL for user-management authorization;
+it does not trust a role claim from the JWT.
+
+For cookie-authenticated browser mutations, first call `GET /csrf` and send both the returned
+`XSRF-TOKEN` cookie and its value in the `X-XSRF-TOKEN` header. Requests authenticated by a
+Bearer header do not require CSRF tokens. Configure `CORS_ALLOWED_ORIGINS` with explicit frontend
+origins when the browser is hosted on another origin; wildcard origins are rejected because
+credentialed cookies are enabled. Set `COOKIE_SECURE=true` in production.
+The Auth `access_token` cookie must also be in scope for the Core request: deploy Auth and Core
+behind the same host/gateway or configure a shared parent cookie domain and `Path=/` in Auth.
+CORS alone cannot make a cookie set for a different host available to Core. The existing Bearer
+header remains supported for clients that send it explicitly.
+
+### Role access
+
+| Role | User-management access |
+| --- | --- |
+| `ADMIN` | Manage Gerentes and transfer a Gerente's direct reports during deactivation. |
+| `GERENTE` | Manage only users whose `created_by_id` is this Gerente; may create `FUNCIONARIO` and `GERENTE_REGIONAL`. |
+| `GERENTE_REGIONAL` | No manager/team CRUD access. |
+| `FUNCIONARIO` | No manager/team CRUD access. |
+
+Before first use, the database must contain at least one active `ADMIN` account created through
+the approved bootstrap process. There is deliberately no public endpoint for creating the first
+ADM.
+
+Accounts are deactivated with `status: "INACTIVE"`; user records are not deleted. A Gerente
+must have an active replacement Gerente selected by an ADM before its direct reports can be
+transferred and the account deactivated.
+
+---
+
+# 0. User profiles and management
+
+These routes read and write account/profile data in PostgreSQL. Passwords supplied during
+provisioning are stored only as BCrypt hashes with cost 12; neither responses nor logs contain
+the password or hash. Login and token/session operations remain in DS_Auth.
+
+## 0.1 Read the current profile
+
+Method: `GET /profile`
+
+Returns the SQL profile belonging to the authenticated JWT `sub`.
+
+Response 200:
+
+```json
+{
+  "id": "42",
+  "name": "Ana Silva",
+  "email": "ana@example.com",
+  "role": "GERENTE",
+  "status": "ACTIVE",
+  "profile_photo_url": null,
+  "store_id": null,
+  "store_code": null,
+  "store_name": null,
+  "region_id": null,
+  "region_code": null,
+  "region_name": null
+}
+```
+
+An inactive or missing account returns `403 Forbidden`.
+
+## 0.2 List regions
+
+Method: `GET /regions`
+
+Available to `ADMIN` and `GERENTE`. Only active ERP-backed regions are returned. `id` is the
+internal SQL identifier to send as `region_id` when provisioning a Regional Manager.
+
+```json
+[{"id":"3","code":"REGION-NORTH","name":"REGION-NORTH"}]
+```
+
+The ERP currently supplies `region_id` but no display name, so `name` initially mirrors the
+ERP code.
+
+## 0.3 Manage Gerentes (ADM web)
+
+All routes require the `ADMIN` role.
+
+| Method and route | Behavior |
+| --- | --- |
+| `GET /managers` | List active and inactive Gerentes. |
+| `POST /managers` | Create a Gerente with a generic initial password. |
+| `GET /managers/{id}` | Read one Gerente. |
+| `PATCH /managers/{id}` | Update name/email or activate/deactivate the Gerente. |
+
+Create request:
+
+```json
+{"name":"Joao Silva","email":"joao@example.com","password":"InitialPass123"}
+```
+
+When a Gerente has direct reports, deactivation requires an active replacement Gerente. In one
+transaction, Core transfers each direct report's `created_by_id` to the replacement and marks
+the old Gerente inactive:
+
+```json
+{"status":"INACTIVE","replacement_manager_id":42}
+```
+
+No `DELETE` route is provided; deactivation preserves account and assignment history.
+
+## 0.4 Manage team members (Gerente web)
+
+All routes require an active `GERENTE`. The list and item routes are restricted to accounts
+whose `created_by_id` matches the current Gerente.
+
+| Method and route | Behavior |
+| --- | --- |
+| `GET /team-members` | List direct reports, including inactive accounts. |
+| `POST /team-members` | Create a `FUNCIONARIO` or `GERENTE_REGIONAL`. |
+| `GET /team-members/{id}` | Read one direct report. |
+| `PATCH /team-members/{id}` | Update name/email/status or assignment. |
+
+Employee request (the `store_id` comes from `GET /branches`):
+
+```json
+{
+  "name":"Maria Souza",
+  "email":"maria@example.com",
+  "password":"InitialPass123",
+  "role":"FUNCIONARIO",
+  "store_id":17
+}
+```
+
+Regional Manager request (the `region_id` comes from `GET /regions`):
+
+```json
+{
+  "name":"Pedro Lima",
+  "email":"pedro@example.com",
+  "password":"InitialPass123",
+  "role":"GERENTE_REGIONAL",
+  "region_id":3
+}
+```
+
+A `FUNCIONARIO` must have exactly one active store assignment. Changing `store_id` closes the
+previous assignment and creates a new history row in the same transaction. A
+`GERENTE_REGIONAL` has one active region assignment, and a region can have only one active
+Regional Manager. Deactivation closes the active assignment; reactivation requires a new
+`store_id` or `region_id`.
+
+Create returns `201`; reads/updates return `200`. Invalid fields or missing required assignments
+return `400`, missing users/branches/regions or out-of-scope team members return `404`, duplicate
+email or occupied active region returns `409`, and role violations return `403`.
 
 ---
 
@@ -499,6 +650,7 @@ Response 200:
 [
   {
     "id": "1",
+    "store_id": 17,
     "name": "Downtown Store",
     "address": null,
     "city": null,
@@ -509,9 +661,10 @@ Response 200:
 ]
 ```
 
-The current ERP batch source provides only the branch code/name. It does not currently supply
-the `region_id`, address, or coordinates needed to populate the remaining branch metadata;
-those fields are therefore returned as `null` until a source and mapping are agreed.
+The ERP provides `region_id`, which the backend synchronizes into the existing region catalog.
+It does not currently provide address or coordinates, so those fields are returned as `null`.
+`id` remains the ERP branch code for compatibility; `store_id` is the internal SQL ID required
+by user assignment routes.
 
 ---
 

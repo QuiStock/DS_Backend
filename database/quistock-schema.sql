@@ -595,6 +595,13 @@ CREATE UNIQUE INDEX "uq_user_store_active_pair"
   ON "user_store" ("user_id", "store_id")
   WHERE "active" = TRUE;
 
+CREATE UNIQUE INDEX "uq_user_store_one_active_per_user"
+  ON "user_store" ("user_id")
+  WHERE "active" = TRUE;
+
+CREATE UNIQUE INDEX "uq_user_account_email_normalized"
+  ON "user_account" (LOWER(BTRIM("email")));
+
 CREATE UNIQUE INDEX "uq_region_manager_active_region"
   ON "region_manager_assignment" ("region_id")
   WHERE "active" = TRUE;
@@ -815,4 +822,11 @@ INSERT INTO "flow_type_catalog" ("code", "description") VALUES
   ('HIGH', 'Stockout or replenishment risk'),
   ('MEDIUM', 'Stock is adequate for current demand'),
   ('LOW', 'Expiration or excess stock risk')
+ON CONFLICT ("code") DO NOTHING;
+
+INSERT INTO "role" ("code", "name") VALUES
+  ('ADMIN', 'ADMIN'),
+  ('GERENTE', 'GERENTE'),
+  ('GERENTE_REGIONAL', 'GERENTE_REGIONAL'),
+  ('FUNCIONARIO', 'FUNCIONARIO')
 ON CONFLICT ("code") DO NOTHING;
