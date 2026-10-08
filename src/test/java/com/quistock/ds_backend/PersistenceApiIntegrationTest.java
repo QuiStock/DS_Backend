@@ -95,6 +95,40 @@ class PersistenceApiIntegrationTest {
   }
 
   @Test
+  void allowsCredentialedCorsFromAnyOrigin() throws Exception {
+    for (String origin : new String[] {"https://managers.example", "https://other.example"}) {
+      HttpRequest preflight =
+          HttpRequest.newBuilder(URI.create(baseUrl() + "/team-members"))
+              .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
+              .header("Origin", origin)
+              .header("Access-Control-Request-Method", "PATCH")
+              .header("Access-Control-Request-Headers", "x-xsrf-token,x-custom-header")
+              .build();
+      HttpResponse<Void> preflightResponse =
+          http.send(preflight, HttpResponse.BodyHandlers.discarding());
+      assertThat(preflightResponse.statusCode()).isEqualTo(200);
+      assertThat(preflightResponse.headers().firstValue("Access-Control-Allow-Origin"))
+          .contains(origin);
+      assertThat(preflightResponse.headers().firstValue("Access-Control-Allow-Credentials"))
+          .contains("true");
+      assertThat(preflightResponse.headers().firstValue("Access-Control-Allow-Headers").orElse(""))
+          .contains("x-custom-header");
+
+      HttpRequest actual =
+          HttpRequest.newBuilder(URI.create(baseUrl() + "/products"))
+              .header("Origin", origin)
+              .GET()
+              .build();
+      HttpResponse<Void> actualResponse = http.send(actual, HttpResponse.BodyHandlers.discarding());
+      assertThat(actualResponse.statusCode()).isEqualTo(401);
+      assertThat(actualResponse.headers().firstValue("Access-Control-Allow-Origin"))
+          .contains(origin);
+      assertThat(actualResponse.headers().firstValue("Access-Control-Allow-Credentials"))
+          .contains("true");
+    }
+  }
+
+  @Test
   void persistsErpDataAndServesTheOperationalApiFlow() throws Exception {
     assertRequestWithoutTokenIsUnauthorized();
     assertRequestWithInvalidTokenIsUnauthorized();
