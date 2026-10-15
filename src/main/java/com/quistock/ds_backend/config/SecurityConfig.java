@@ -76,6 +76,14 @@ public class SecurityConfig {
                     .requestMatchers(
                         HttpMethod.GET, "/health", "/health/liveness", "/health/readiness")
                     .permitAll()
+                    .requestMatchers(
+                        HttpMethod.GET,
+                        "/swagger-ui.html",
+                        "/swagger-ui/**",
+                        "/v3/api-docs",
+                        "/v3/api-docs/**",
+                        "/v3/api-docs.yaml")
+                    .permitAll()
                     .anyRequest()
                     .authenticated())
         .addFilterBefore(authentication, AnonymousAuthenticationFilter.class)
