@@ -225,11 +225,13 @@ class ErpSnapshotRepository {
   int deactivateMissing(long syncId) {
     int deactivatedBatches =
         jdbc.update(
-            "UPDATE batch SET active = FALSE WHERE active = TRUE AND last_sync_id IS DISTINCT FROM :syncId",
+            "UPDATE batch SET active = FALSE WHERE active = TRUE AND last_sync_id IS DISTINCT FROM"
+                + " :syncId",
             new MapSqlParameterSource(SYNC_ID_PARAMETER, syncId));
     int deactivatedProductsByStore =
         jdbc.update(
-            "UPDATE product_store SET active = FALSE WHERE active = TRUE AND last_sync_id IS DISTINCT FROM :syncId",
+            "UPDATE product_store SET active = FALSE WHERE active = TRUE AND last_sync_id IS"
+                + " DISTINCT FROM :syncId",
             new MapSqlParameterSource(SYNC_ID_PARAMETER, syncId));
     int deactivatedStores =
         jdbc.update(

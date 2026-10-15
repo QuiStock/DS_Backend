@@ -4,6 +4,7 @@ import com.quistock.ds_backend.exception.ErpIntegrationException;
 import com.quistock.ds_backend.model.dto.ErpIntegrationStatusDTO;
 import com.quistock.ds_backend.repository.ErpSyncRepository;
 import java.time.Instant;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -19,7 +20,7 @@ public class ErpIntegrationService {
   private final ErpSyncRepository syncRepository;
 
   public ErpIntegrationService(
-      RestClient restClient,
+      @Qualifier("erpRestClient") RestClient restClient,
       @Value("${erp.api.products-path:/products}") String path,
       ErpSyncRepository repository) {
     this.erpRestClient = restClient;

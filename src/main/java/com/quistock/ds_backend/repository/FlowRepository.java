@@ -107,8 +107,8 @@ public class FlowRepository {
     String sql =
         FLOW_SELECT
             + " WHERE (CAST(:flowType AS text) IS NULL OR ft.code = CAST(:flowType AS flow_type))"
-            + " AND (CAST(:productErpId AS text) IS NULL OR (p.erp_id = :productErpId AND s.erp_id = :storeErpId))"
-            + " ORDER BY pa.created_at DESC, pa.id DESC";
+            + " AND (CAST(:productErpId AS text) IS NULL OR (p.erp_id = :productErpId AND s.erp_id"
+            + " = :storeErpId)) ORDER BY pa.created_at DESC, pa.id DESC";
     if (status != null && !"ANALYZED".equals(status)) {
       return List.of();
     }

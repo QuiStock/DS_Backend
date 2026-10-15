@@ -1,21 +1,26 @@
 package com.quistock.ds_backend.config;
 
-import jakarta.servlet.http.Cookie;
+import java.util.Arrays;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
-import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationProvider;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
+import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
-import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -26,24 +31,43 @@ public class SecurityConfig {
   @SuppressWarnings("PMD.SignatureDeclareThrowsException")
   SecurityFilterChain apiSecurityFilterChain(
       HttpSecurity http,
-      BearerTokenResolver cookieBearerTokenResolver,
-      CookieCsrfTokenRepository csrfTokenRepository)
+      JwtDecoder decoder,
+      @Value("${auth.csrf.cookie-secure:true}") boolean secure,
+      @Value("${auth.csrf.cookie-same-site:Lax}") String sameSite)
       throws Exception {
-    RequestMatcher bearerHeaderRequest =
-        request -> {
-          String authorization = request.getHeader("Authorization");
-          return authorization != null
-              && authorization.regionMatches(true, 0, "Bearer ", 0, "Bearer ".length());
-        };
+    if (!List.of("Lax", "Strict", "None").contains(sameSite)
+        || "None".equals(sameSite) && !secure) {
+      throw new IllegalStateException(
+          "CSRF cookie SameSite must be Lax, Strict or None; None requires Secure.");
+    }
+    CookieCsrfTokenRepository csrf = new CookieCsrfTokenRepository();
+    csrf.setCookieName("XSRF-TOKEN");
+    csrf.setHeaderName("X-XSRF-TOKEN");
+    csrf.setCookieCustomizer(
+        cookie -> cookie.path("/").secure(secure).httpOnly(true).sameSite(sameSite));
+    BearerTokenAuthenticationConverter converter = new BearerTokenAuthenticationConverter();
+    converter.setBearerTokenResolver(new AccessTokenResolver());
+    BearerTokenAuthenticationFilter authentication =
+        new BearerTokenAuthenticationFilter(
+            new ProviderManager(new JwtAuthenticationProvider(decoder)), converter);
+    // The resource-server DSL exempts every resolved token from CSRF, including cookies.
+    // Register its standard authentication filter explicitly to keep cookies protected.
     return http.csrf(
-            csrf ->
-                csrf.csrfTokenRepository(csrfTokenRepository)
+            config ->
+                config
+                    .csrfTokenRepository(csrf)
                     .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                    .ignoringRequestMatchers(bearerHeaderRequest))
-        .addFilterBefore(
-            new CookieCsrfProtectionFilter(csrfTokenRepository),
-            BearerTokenAuthenticationFilter.class)
+                    .requireCsrfProtectionMatcher(AccessTokenResolver::requiresCsrf))
         .cors(Customizer.withDefaults())
+        .requestCache(AbstractHttpConfigurer::disable)
+        .logout(AbstractHttpConfigurer::disable)
+        .httpBasic(AbstractHttpConfigurer::disable)
+        .formLogin(AbstractHttpConfigurer::disable)
+        .exceptionHandling(
+            errors ->
+                errors
+                    .authenticationEntryPoint(new BearerTokenAuthenticationEntryPoint())
+                    .accessDeniedHandler(new BearerTokenAccessDeniedHandler()))
         .sessionManagement(
             session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(
@@ -52,55 +76,25 @@ public class SecurityConfig {
                     .requestMatchers(
                         HttpMethod.GET, "/health", "/health/liveness", "/health/readiness")
                     .permitAll()
-                    .requestMatchers(HttpMethod.GET, "/csrf")
-                    .permitAll()
                     .anyRequest()
                     .authenticated())
-        .oauth2ResourceServer(
-            resourceServer ->
-                resourceServer
-                    .bearerTokenResolver(cookieBearerTokenResolver)
-                    .jwt(Customizer.withDefaults()))
+        .addFilterBefore(authentication, AnonymousAuthenticationFilter.class)
         .build();
   }
 
   @Bean
-  BearerTokenResolver cookieBearerTokenResolver() {
-    DefaultBearerTokenResolver headerResolver = new DefaultBearerTokenResolver();
-    return request -> {
-      String headerToken = headerResolver.resolve(request);
-      if (headerToken != null) {
-        return headerToken;
-      }
-      Cookie[] cookies = request.getCookies();
-      if (cookies != null) {
-        for (Cookie cookie : cookies) {
-          if ("access_token".equals(cookie.getName()) && !cookie.getValue().isBlank()) {
-            return cookie.getValue();
-          }
-        }
-      }
-      return null;
-    };
-  }
-
-  @Bean
-  CookieCsrfTokenRepository csrfTokenRepository(
-      @Value("${app.cookie.secure:true}") boolean secureCookie) {
-    CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
-    repository.setCookiePath("/");
-    repository.setCookieCustomizer(
-        cookie -> cookie.secure(secureCookie).sameSite(secureCookie ? "None" : "Lax"));
-    return repository;
-  }
-
-  @Bean
-  CorsConfigurationSource corsConfigurationSource() {
+  CorsConfigurationSource corsConfigurationSource(
+      @Value("${app.cors.allowed-origins:}") String origins) {
     CorsConfiguration cors = new CorsConfiguration();
-    cors.setAllowedOriginPatterns(List.of("*"));
+    cors.setAllowedOrigins(
+        Arrays.stream(origins.split(","))
+            .map(String::trim)
+            .filter(value -> !value.isEmpty())
+            .toList());
     cors.setAllowCredentials(true);
-    cors.setAllowedMethods(List.of("*"));
-    cors.setAllowedHeaders(List.of("*"));
+    cors.validateAllowCredentials();
+    cors.setAllowedMethods(List.of("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+    cors.setAllowedHeaders(List.of("Content-Type", "Authorization", "X-XSRF-TOKEN"));
     cors.setMaxAge(3600L);
     UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
     source.registerCorsConfiguration("/**", cors);

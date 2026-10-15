@@ -14,7 +14,7 @@ import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 
 @Configuration
-class JwtDecoderConfig {
+public class JwtDecoderConfig {
   @Bean
   JwtDecoder jwtDecoder(
       @Value("${auth.jwt.jwk-set-uri}") String jwkSetUri,
@@ -28,10 +28,18 @@ class JwtDecoderConfig {
     decoder.setJwtValidator(
         new DelegatingOAuth2TokenValidator<>(
             JwtValidators.createDefaultWithIssuer(issuer),
+            expirationValidator(),
             audienceValidator(audience),
             subjectValidator(),
             emailValidator()));
     return decoder;
+  }
+
+  private OAuth2TokenValidator<Jwt> expirationValidator() {
+    return jwt ->
+        jwt.getExpiresAt() != null
+            ? OAuth2TokenValidatorResult.success()
+            : invalidToken("The access token must have an expiration time.");
   }
 
   private OAuth2TokenValidator<Jwt> audienceValidator(String audience) {

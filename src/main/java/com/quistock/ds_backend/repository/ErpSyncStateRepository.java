@@ -58,7 +58,8 @@ class ErpSyncStateRepository {
   boolean hasCompletedSync() {
     Boolean completed =
         jdbc.queryForObject(
-            "SELECT EXISTS (SELECT 1 FROM erp_sync WHERE status IN ('COMPLETED', 'COMPLETED_WITH_ERRORS'))",
+            "SELECT EXISTS (SELECT 1 FROM erp_sync WHERE status IN ('COMPLETED',"
+                + " 'COMPLETED_WITH_ERRORS'))",
             new MapSqlParameterSource(),
             Boolean.class);
     return Boolean.TRUE.equals(completed);
