@@ -139,3 +139,26 @@ refresh, logout e consulta autenticada para validar o contrato funcional complet
 ## Cookie authentication and AI chat
 
 See [the integration guide](docs/core-cookie-csrf-ai.md) for the cookie/Bearer rules, CSRF flow, environment variables and the updated chat contract.
+
+## Documentação automática (Swagger/OpenAPI)
+
+Com a API iniciada, acesse `/swagger-ui.html` (ou `/swagger-ui/index.html`).
+O contrato gerado fica em `/v3/api-docs` (JSON) e `/v3/api-docs.yaml` (YAML).
+Esses caminhos são públicos e relativos à raiz/contexto da Core; em um gateway
+com prefixo `/api`, publique também `/api/swagger-ui/**` e `/api/v3/api-docs*`.
+Em acesso direto no Render, use a origem da Core sem adicionar esse prefixo.
+
+A documentação é gerada dos controllers, DTOs e validações e inclui filtros,
+IDs, corpos de request/response, status HTTP e os endpoints de health do Actuator.
+A dependência springdoc 3.1.1 é compatível com Spring Boot 4; referência oficial:
+https://springdoc.org/getting-started.html
+
+No Swagger, `Authorize` permite informar um JWT Bearer válido. Para chamadas
+com cookie `access_token`, preserve o cookie manager e consulte `GET /csrf`
+autenticado; envie o campo `token` retornado no header `X-XSRF-TOKEN` das
+escritas. Cada operação de escrita exibe esse parâmetro. Não combine cookie
+com Bearer. O navegador não permite definir cookies HTTP-only pelo botão
+Authorize; cookies da Auth só chegam à Core se o escopo de host/domínio permitir.
+O Swagger não cria uma rota para expor tokens nem remove a autenticação das APIs.
+Se o gateway remover um prefixo público, alinhe os headers encaminhados e o
+contexto da aplicação para que os URLs gerados pelo Swagger preservem esse prefixo.
