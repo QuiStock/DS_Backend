@@ -1,7 +1,7 @@
 # QuiStock API Contract
 
-Version: 1.5.0
-Last updated: 2026-10-07
+Version: 2.0.0
+Last updated: 2026-10-12
 
 ## Base URL
 
@@ -28,12 +28,18 @@ the integration boundary; all public API fields and internal code identifiers ar
 
 ## Authentication
 
-Business API routes accept the Auth API's `access_token` HTTP-only cookie or an access token in
-the `Authorization` header:
+All operational API routes require an RS256 access JWT, supplied either in
+`Authorization: Bearer <access_token>` or the HTTP-only `access_token` cookie.
+Both use the same JWKS, issuer, audience, expiration, positive SQL `sub`, and
+nonblank `email` validation. Missing/invalid tokens return 401. Combining an
+Authorization header and access cookie, or duplicate access cookies, returns 400.
+Refresh cookies never authenticate Core requests.
 
-```text
-Authorization: Bearer <access_token>
-```
+Cookie-authenticated unsafe requests require a CSRF cookie/header pair:
+authenticated `GET /csrf` returns `{"headerName":"X-XSRF-TOKEN","token":"..."}`
+and sets `XSRF-TOKEN`. Send both that cookie and the returned
+`X-XSRF-TOKEN` header on POST/PUT/PATCH/DELETE. Missing or invalid CSRF returns
+403. Bearer-only requests are exempt. CSRF responses are not cached. Configure `CORS_ALLOWED_ORIGINS` with exact frontend origins, `CSRF_COOKIE_SECURE` (falls back to `COOKIE_SECURE`) and `CSRF_COOKIE_SAME_SITE`. See [the integration guide](docs/core-cookie-csrf-ai.md).
 
 The separate DS_Auth service issues the cookie and remains responsible for login, refresh, and
 logout. Core acts as an OAuth2 resource server and accepts RS256 JWTs. It validates the token signature
@@ -48,11 +54,6 @@ creation, triage, decisions, and logs come from the authenticated `sub`, never f
 body. Core looks up the active account and role in PostgreSQL for user-management authorization;
 it does not trust a role claim from the JWT.
 
-For cookie-authenticated browser mutations, first call `GET /csrf` and send both the returned
-`XSRF-TOKEN` cookie and its value in the `X-XSRF-TOKEN` header. Requests authenticated by a
-Bearer header do not require CSRF tokens. Configure `CORS_ALLOWED_ORIGINS` with explicit frontend
-origins when the browser is hosted on another origin; wildcard origins are rejected because
-credentialed cookies are enabled. Set `COOKIE_SECURE=true` in production.
 The Auth `access_token` cookie must also be in scope for the Core request: deploy Auth and Core
 behind the same host/gateway or configure a shared parent cookie domain and `Path=/` in Auth.
 CORS alone cannot make a cookie set for a different host available to Core. The existing Bearer
@@ -594,45 +595,55 @@ Response 200:
 
 ---
 
-# 4. Chat prototype
+# 4. AI chat
 
-The current `/chat` route is a rule-based prototype. It does not call an AI/ML model and does
-not persist conversation history. The AI chat feature remains future scope. This route also
-requires the access token described in Authentication.
+`POST /chat` now forwards to the AI conversation API, replacing the former
+rule-based prototype. Configure `AI_API_BASE_URL`; a blank value returns 503
+`AI_NOT_CONFIGURED` without preventing the other APIs from starting.
 
-## 4.1 Send a chatbot message
-
-The following endpoint is a placeholder in the current code and does not provide an AI chatbot.
-Do not depend on it from the mobile app yet.
-
-Method:
-
-`POST /chat`
-
-Body:
+Request:
 
 ```json
 {
-  "message": "Which products need a promotion?"
+  "message": "Which products need attention?",
+  "conversation_id": "existing-conversation",
+  "is_resuming_conversation": false
 }
 ```
 
-Response 200:
+Message is required, nonblank and at most 4,000 characters. Omit conversation_id
+to start a conversation; Core generates and returns a UUID string. Reuse the ID
+for subsequent messages. Supplied IDs are nonblank strings of up to 200
+characters. is_resuming_conversation defaults to false; true requires an
+existing ID and is sent for the first new message after selecting an ended
+conversation. Core generates sent_at in UTC.
+
+Core sends only message, sent_at and is_resuming_conversation to
+`POST /api/v1/conversations/{conversation_id}/messages` with the validated
+access JWT as Bearer. It never forwards cookies or caller-supplied identity.
+
+Response 200 (breaking replacement of answer/responsible_agent/referenced_data):
 
 ```json
 {
-  "answer": "There are products at risk of expiration. The main suggestion is to create a promotion for Whole Milk 1L.",
-  "responsible_agent": "operations_agent",
-  "referenced_data": [
-    {
-      "product_id": "PROD001:FIL001",
-      "name": "Whole Milk 1L",
-      "flow_type": "LOW",
-      "suggested_action": "PROMOTION"
-    }
-  ]
+  "conversation_id": "existing-conversation",
+  "request_id": "ai-request-id",
+  "response": "AI response",
+  "status": "success"
 }
 ```
+
+Allowed statuses: success, rejected, clarification_required, out_of_scope, error.
+An AI guardrail rejection returns the same response structure with HTTP 422 and
+status rejected. Upstream authorization/not-found/conflict/rate-limit responses
+map to 401/403/404/409/429 with sanitized Core errors. Invalid AI responses and
+AI server errors return 502; connection failure returns 503; timeout returns 504.
+Core validates the returned conversation ID and does not retry message POSTs.
+
+Chat responses are not cached. History is owned by AI; no PostgreSQL chat
+persistence or history/list/end routes are added in this phase. See
+[the integration guide](docs/core-cookie-csrf-ai.md) for all error codes and
+timeout configuration.
 
 ---
 

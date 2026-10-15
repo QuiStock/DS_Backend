@@ -13,6 +13,19 @@ O script completo para execução manual está em [`database/quistock-schema.sql
 Use-o em banco novo; não o reaplique sobre tabelas existentes. Copie `.env.example` para `.env`
 e ajuste as credenciais, o endereço do ERP e as variáveis `AUTH_JWT_*` para a API de autenticação.
 
+### Carga manual de usuários de desenvolvimento
+
+Depois que o schema estiver aplicado, execute `database/bootstrap-dev.sql` para criar os perfis
+`GERENTE_REGIONAL` e `FUNCIONARIO` e uma conta local de cada tipo. O script usa hashes BCrypt,
+é idempotente para os perfis e emails já existentes e não é executado automaticamente pela API.
+No PowerShell, use `psql "$env:DB_URL" -v ON_ERROR_STOP=1 -f .\database\bootstrap-dev.sql`.
+
+As senhas aleatórias geradas para essas contas ficam em
+`database/bootstrap-dev-credentials.local.md`, ignorado pelo Git. Use essas contas somente em
+desenvolvimento. O gerente regional deve autenticar com `platform=website`; o repositor, com
+`platform=mobile`. O seed não atribui região nem filial às contas. Não aplique em produção nem
+reutilize as senhas em outros ambientes.
+
 O ERP é sincronizado na inicialização e, por padrão, a cada 15 minutos. Se a primeira leitura
 de produtos ocorrer antes da sincronização agendada, `GET /products` tenta carregar o primeiro
 snapshot. Configure o intervalo com `ERP_SYNC_FIXED_DELAY_MS` ou desative o processo com
@@ -23,7 +36,7 @@ Como ele não envia eventos de venda individuais, as tabelas `sale` e `sale_item
 para uma integração ERP que disponibilize esses eventos. As rotas de negócio exigem um access
 token JWT. Para as ações, `sub` deve ser o ID numérico de `user_account.id`; ele é salvo como
 autor no SQL. A API verifica a assinatura pelo JWKS, issuer, audience, validade e os claims `sub`
-e `email`. Health e `GET /csrf` são públicos.
+e `email`. Health é público; `GET /csrf` exige o access token.
 
 O contrato da API está em [`api-contract.md`](api-contract.md), o plano da persistência atual em
 [`persistence-plan.md`](persistence-plan.md). A API de autenticação está no repositório DS_Auth.
@@ -36,8 +49,8 @@ por login e sessão. Os códigos de perfil no SQL são `ADMIN`, `GERENTE`, `GERE
 
 O token pode chegar como cookie HTTP-only `access_token` ou como Bearer token. Para mutations
 via cookie, o cliente consulta `GET /csrf` e devolve o cookie `XSRF-TOKEN` no header
-`X-XSRF-TOKEN`. Em produção, configure `COOKIE_SECURE=true`. O CORS aceita qualquer origem,
-método e header e permite credenciais; a origem da requisição é refletida na resposta.
+`X-XSRF-TOKEN` usando o campo `token` da resposta. Em produção, configure `COOKIE_SECURE=true`.
+O CORS permite credenciais apenas para as origens exatas de `CORS_ALLOWED_ORIGINS`.
 Auth e Core precisam compartilhar host/gateway ou domínio pai de cookie com `Path=/` para o
 navegador enviar o cookie de Auth nas chamadas ao Core. CORS não compartilha cookies entre hosts.
 
@@ -122,3 +135,7 @@ Smoke de ambiente a executar posteriormente: consultar a rota sem token, exigir 
 cada dependência deve recuperar 200. Repetir pelo gateway e com contexto configurado.
 JWT em cache não deve mascarar falha do JWKS. Complementar o health com login,
 refresh, logout e consulta autenticada para validar o contrato funcional completo.
+
+## Cookie authentication and AI chat
+
+See [the integration guide](docs/core-cookie-csrf-ai.md) for the cookie/Bearer rules, CSRF flow, environment variables and the updated chat contract.

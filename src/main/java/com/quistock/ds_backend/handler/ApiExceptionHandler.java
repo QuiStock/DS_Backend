@@ -1,6 +1,7 @@
 package com.quistock.ds_backend.handler;
 
 import com.quistock.ds_backend.exception.ActionNotFoundException;
+import com.quistock.ds_backend.exception.AiIntegrationException;
 import com.quistock.ds_backend.exception.ErpIntegrationException;
 import com.quistock.ds_backend.exception.FlowNotFoundException;
 import com.quistock.ds_backend.exception.InvalidActionStatusException;
@@ -17,6 +18,12 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+  @ExceptionHandler(AiIntegrationException.class)
+  public ResponseEntity<ErrorDTO> handleAiIntegrationException(AiIntegrationException exception) {
+    return ResponseEntity.status(exception.status())
+        .body(new ErrorDTO(exception.code(), exception.getMessage()));
+  }
 
   @ExceptionHandler(ProductNotFoundException.class)
   public ResponseEntity<ErrorDTO> handleProductNotFoundException(

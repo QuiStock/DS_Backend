@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.ParameterizedTypeReference;
@@ -29,7 +30,7 @@ public class ErpSyncService {
   private final AtomicBoolean running = new AtomicBoolean();
 
   public ErpSyncService(
-      RestClient erpRestClient,
+      @Qualifier("erpRestClient") RestClient erpRestClient,
       @Value("${erp.api.products-path:/products}") String productsPath,
       ErpSyncRepository syncRepository) {
     this.erpRestClient = erpRestClient;

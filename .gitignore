@@ -42,3 +42,6 @@ out/
 .gradle-unixdomain/
 backend-run*.log
 .gradle-user-home/
+
+# Local development-only bootstrap credentials (never commit passwords)
+/database/bootstrap-dev-credentials.local.md

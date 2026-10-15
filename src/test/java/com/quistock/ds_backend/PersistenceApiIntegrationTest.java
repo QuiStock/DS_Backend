@@ -165,10 +165,10 @@ class PersistenceApiIntegrationTest {
     String mediumFlowId = analyze("SKU-MEDIUM:STORE-1", "MEDIUM");
     String lowFlowId = analyze("SKU-LOW:South Branch", "LOW");
     assertThat(
-            post("/chat", "{\"message\":\"Which products need a promotion?\"}", 200)
-                .path("referenced_data")
-                .isArray())
-        .isTrue();
+            post("/chat", "{\"message\":\"Which products need a promotion?\"}", 503)
+                .path("error")
+                .asText())
+        .isEqualTo("AI_NOT_CONFIGURED");
     assertThat(get("/flows?flow_type=HIGH", 200).size()).isEqualTo(1);
     assertThat(get("/flows?product_id=SKU-HIGH:STORE-1&status=ANALYZED", 200).size()).isEqualTo(1);
 
@@ -438,7 +438,8 @@ class PersistenceApiIntegrationTest {
     patchAs("/team-members/" + regionalManagerId, "{\"status\":\"INACTIVE\"}", 200, managerToken);
     assertThat(
             jdbc.queryForObject(
-                "SELECT COUNT(*) FROM region_manager_assignment WHERE user_id = ? AND active = TRUE",
+                "SELECT COUNT(*) FROM region_manager_assignment WHERE user_id = ? AND active ="
+                    + " TRUE",
                 Integer.class,
                 Long.parseLong(regionalManagerId)))
         .isZero();
@@ -493,7 +494,10 @@ class PersistenceApiIntegrationTest {
     String managerToken = tokenFor(Long.parseLong(managerId), "replacement@test.example");
     HttpResponse<String> csrfResponse =
         http.send(
-            HttpRequest.newBuilder(URI.create(baseUrl() + "/csrf")).GET().build(),
+            HttpRequest.newBuilder(URI.create(baseUrl() + "/csrf"))
+                .header("Cookie", "access_token=" + managerToken)
+                .GET()
+                .build(),
             HttpResponse.BodyHandlers.ofString());
     assertThat(csrfResponse.statusCode()).isEqualTo(200);
     String token = objectMapper.readTree(csrfResponse.body()).path("token").asString();
