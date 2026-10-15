@@ -80,6 +80,8 @@ class PersistenceApiIntegrationTest {
     registry.add("auth.jwt.issuer", () -> TEST_ISSUER);
     registry.add("auth.jwt.audience", () -> TEST_AUDIENCE);
     registry.add(
+        "app.cors.allowed-origins", () -> "https://managers.example,https://other.example");
+    registry.add(
         "auth.jwt.jwk-set-uri",
         () -> "http://127.0.0.1:" + erpServer.getAddress().getPort() + "/jwks");
     registry.add("erp.sync.enabled", () -> true);
@@ -95,14 +97,14 @@ class PersistenceApiIntegrationTest {
   }
 
   @Test
-  void allowsCredentialedCorsFromAnyOrigin() throws Exception {
+  void allowsCredentialedCorsFromConfiguredOrigins() throws Exception {
     for (String origin : new String[] {"https://managers.example", "https://other.example"}) {
       HttpRequest preflight =
           HttpRequest.newBuilder(URI.create(baseUrl() + "/team-members"))
               .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
               .header("Origin", origin)
               .header("Access-Control-Request-Method", "PATCH")
-              .header("Access-Control-Request-Headers", "x-xsrf-token,x-custom-header")
+              .header("Access-Control-Request-Headers", "x-xsrf-token,content-type")
               .build();
       HttpResponse<Void> preflightResponse =
           http.send(preflight, HttpResponse.BodyHandlers.discarding());
@@ -112,7 +114,7 @@ class PersistenceApiIntegrationTest {
       assertThat(preflightResponse.headers().firstValue("Access-Control-Allow-Credentials"))
           .contains("true");
       assertThat(preflightResponse.headers().firstValue("Access-Control-Allow-Headers").orElse(""))
-          .contains("x-custom-header");
+          .contains("x-xsrf-token");
 
       HttpRequest actual =
           HttpRequest.newBuilder(URI.create(baseUrl() + "/products"))
