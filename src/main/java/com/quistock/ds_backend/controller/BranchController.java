@@ -8,6 +8,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -35,9 +37,12 @@ public class BranchController {
   @GetMapping
   @Operation(
       summary = "Listar filiais",
-      description = "Retorna filiais ERP e store_id interno usado nas associações de funcionários.")
+      description =
+          "Exige conta SQL ativa. GERENTE_REGIONAL recebe apenas filiais ativas da própria"
+              + " região ativa; sem atribuição retorna 403. Os demais perfis mantêm a lista de filiais"
+              + " ativas. Retorna id ERP, store_id e region_id internos para os seletores do Web.")
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
-  public List<BranchDTO> listBranches() {
-    return branchService.listBranches();
+  public List<BranchDTO> listBranches(@AuthenticationPrincipal Jwt jwt) {
+    return branchService.listBranches(Long.parseLong(jwt.getSubject()));
   }
 }

@@ -17,6 +17,7 @@
 - `FUNCIONARIO` e `GERENTE` têm uma única filial ativa em `user_store`; trocas fecham o vínculo anterior e preservam o histórico. `GERENTE_REGIONAL` tem uma região ativa, e cada região pode ter um único Gerente Regional ativo. `store.region_id` determina o escopo do regional. Desativações encerram as atribuições ativas.
 - Ao desativar um `GERENTE` com funcionários ativos na filial, o ADM ou regional responsável informa um Gerente ativo substituto da mesma filial. Os funcionários permanecem vinculados à filial e `created_by_id` preserva a autoria do cadastro. Não foi criada a coluna `manager_user_id`.
 - `/team-members` cadastra apenas `FUNCIONARIO`; não permite a um Gerente cadastrar regionais. Usuários inativos são consultados pela última filial do histórico. Gerentes existentes precisam ser associados à filial correta antes de usar o novo fluxo; nenhuma associação é inferida automaticamente.
+- `GET /branches` exige conta SQL ativa e inclui o ID SQL `region_id`. Para `GERENTE_REGIONAL`, filtra as filiais ativas pela sua atribuição regional ativa; sem atribuição retorna 403. Não foi alterada a estrutura do banco.
 - `/regions` consulta as regiões recebidas do ERP. `/branches` continua como rota de filiais somente leitura e mantém `id` com o código ERP; adiciona `store_id` interno para cadastros e atribuições.
 - O endpoint `/chat` existente é apenas um protótipo baseado em regras; não é a funcionalidade de chat com IA/ML planejada. Notificações e ajustes do dashboard ficam fora deste escopo.
 
