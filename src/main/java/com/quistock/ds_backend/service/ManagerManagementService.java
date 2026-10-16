@@ -1,5 +1,6 @@
 package com.quistock.ds_backend.service;
 
+import com.quistock.ds_backend.exception.AssignmentTargetNotFoundException;
 import com.quistock.ds_backend.exception.ConflictException;
 import com.quistock.ds_backend.exception.InvalidRequestException;
 import com.quistock.ds_backend.exception.UserNotFoundException;
@@ -10,7 +11,11 @@ import com.quistock.ds_backend.repository.NewUserAccount;
 import com.quistock.ds_backend.repository.UserAccountReadRepository;
 import com.quistock.ds_backend.repository.UserAccountWriteRepository;
 import com.quistock.ds_backend.repository.UserAssignmentRepository;
+import java.util.List;
+import java.util.Objects;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,7 +26,7 @@ class ManagerManagementService {
   private final UserAssignmentRepository assignmentRepository;
   private final UserAccessGuard accessGuard;
   private final UserInputNormalizer normalizer;
-  private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+  private final PasswordEncoder passwordEncoder;
 
   ManagerManagementService(
       UserAccountReadRepository readRepository,
@@ -29,7 +34,7 @@ class ManagerManagementService {
       UserAssignmentRepository assignmentRepository,
       UserAccessGuard accessGuard,
       UserInputNormalizer normalizer,
-      org.springframework.security.crypto.password.PasswordEncoder passwordEncoder) {
+      PasswordEncoder passwordEncoder) {
     this.readRepository = readRepository;
     this.writeRepository = writeRepository;
     this.assignmentRepository = assignmentRepository;
@@ -39,14 +44,17 @@ class ManagerManagementService {
   }
 
   @Transactional(readOnly = true)
-  public java.util.List<UserDTO> listManagers(long actorId) {
-    accessGuard.requireRole(actorId, UserManagementRules.ADMIN);
-    return readRepository.findManagers();
+  public List<UserDTO> listManagers(long actorId) {
+    Long regionId = accessGuard.requireManagerManagement(actorId);
+    return regionId == null
+        ? readRepository.findManagers()
+        : readRepository.findManagersInRegion(regionId);
   }
 
   @Transactional
   public UserDTO createManager(long actorId, CreateManagerRequest request) {
-    accessGuard.requireRole(actorId, UserManagementRules.ADMIN);
+    Long regionId = accessGuard.requireManagerManagement(actorId);
+    validateStore(request.storeId(), regionId);
     String email = normalizer.email(request.email());
     try {
       long id =
@@ -57,6 +65,7 @@ class ManagerManagementService {
                   email,
                   passwordEncoder.encode(request.password()),
                   actorId));
+      assignmentRepository.insertStoreAssignment(id, request.storeId());
       writeRepository.insertAuditEvent(actorId, id, "CREATE", UserManagementRules.MANAGER, email);
       return readRepository.findManager(id).orElseThrow(UserNotFoundException::new);
     } catch (DataIntegrityViolationException exception) {
@@ -66,17 +75,19 @@ class ManagerManagementService {
 
   @Transactional(readOnly = true)
   public UserDTO getManager(long actorId, long managerId) {
-    accessGuard.requireRole(actorId, UserManagementRules.ADMIN);
-    return readRepository.findManager(managerId).orElseThrow(UserNotFoundException::new);
+    return scopedManager(managerId, accessGuard.requireManagerManagement(actorId));
   }
 
   @Transactional
   public UserDTO updateManager(long actorId, long managerId, UpdateManagerRequest request) {
-    accessGuard.requireRole(actorId, UserManagementRules.ADMIN);
-    UserDTO manager = readRepository.findManager(managerId).orElseThrow(UserNotFoundException::new);
+    Long regionId = accessGuard.requireManagerManagement(actorId);
+    Long replacementId = request.replacementManagerId();
+    assignmentRepository.lockUsers(managerId, replacementId == null ? managerId : replacementId);
+    UserDTO manager = scopedManager(managerId, regionId);
     ManagerChanges changes = changes(request);
+    validateAssignment(manager, changes, regionId);
     try {
-      updateStatus(actorId, manager, managerId, request.replacementManagerId(), changes.status());
+      updateAssignments(manager, changes, request.replacementManagerId());
       writeRepository.updateUser(managerId, changes.name(), changes.email(), changes.status());
       writeRepository.insertAuditEvent(
           actorId,
@@ -90,42 +101,72 @@ class ManagerManagementService {
     }
   }
 
-  private void updateStatus(
-      long actorId, UserDTO manager, long managerId, Long replacementId, String status) {
-    if (UserManagementRules.INACTIVE.equals(status)) {
-      transferReportsAndCloseAssignments(actorId, manager, managerId, replacementId);
-    } else if (replacementId != null) {
+  private UserDTO scopedManager(long managerId, Long regionId) {
+    UserDTO manager = readRepository.findManager(managerId).orElseThrow(UserNotFoundException::new);
+    if (regionId != null && !regionId.equals(manager.regionId())) {
+      throw new UserNotFoundException();
+    }
+    return manager;
+  }
+
+  private void validateStore(Long storeId, Long regionId) {
+    if (storeId == null) {
       throw new InvalidRequestException();
+    }
+    long storeRegion =
+        assignmentRepository
+            .findActiveStoreRegion(storeId)
+            .orElseThrow(AssignmentTargetNotFoundException::new);
+    if (regionId != null && regionId != storeRegion) {
+      throw new AccessDeniedException("The store is outside the regional manager's region.");
     }
   }
 
-  private void transferReportsAndCloseAssignments(
-      long actorId, UserDTO manager, long managerId, Long replacementId) {
-    int directReports = writeRepository.countDirectReports(managerId);
-    if (directReports > 0 && replacementId == null) {
+  private void validateAssignment(UserDTO manager, ManagerChanges changes, Long regionId) {
+    String resultingStatus = changes.status() == null ? manager.status() : changes.status();
+    if (changes.storeId() == null) {
+      if (changes.requiresStore(manager, resultingStatus)) {
+        throw new InvalidRequestException();
+      }
+      return;
+    }
+    if (!UserManagementRules.ACTIVE.equals(resultingStatus)) {
       throw new InvalidRequestException();
     }
-    if (replacementId != null) {
-      transferReports(actorId, manager, managerId, replacementId);
-    }
-    assignmentRepository.closeStoreAssignments(managerId);
-    assignmentRepository.closeRegionAssignments(managerId);
+    validateStore(changes.storeId(), regionId);
   }
 
-  private void transferReports(long actorId, UserDTO manager, long managerId, long replacementId) {
+  private void updateAssignments(UserDTO manager, ManagerChanges changes, Long replacementId) {
+    long managerId = Long.parseLong(manager.id());
+    if (UserManagementRules.INACTIVE.equals(changes.status())) {
+      validateReplacement(manager, replacementId);
+      assignmentRepository.closeStoreAssignments(managerId);
+    } else {
+      if (replacementId != null) {
+        throw new InvalidRequestException();
+      }
+      if (changes.storeId() != null
+          && (!Objects.equals(changes.storeId(), manager.storeId())
+              || UserManagementRules.INACTIVE.equals(manager.status()))) {
+        assignmentRepository.reassignStore(managerId, changes.storeId());
+      }
+    }
+  }
+
+  private void validateReplacement(UserDTO manager, Long replacementId) {
+    if (replacementId == null) {
+      if (manager.storeId() != null
+          && assignmentRepository.storeHasActiveEmployees(manager.storeId())) {
+        throw new InvalidRequestException();
+      }
+      return;
+    }
     UserDTO replacement =
         readRepository.findManager(replacementId).orElseThrow(UserNotFoundException::new);
-    if (replacementId == managerId || !UserManagementRules.ACTIVE.equals(replacement.status())) {
+    if (manager.id().equals(replacement.id())
+        || !UserManagementRules.ACTIVE.equals(replacement.status())
+        || !Objects.equals(manager.storeId(), replacement.storeId())) {
       throw new InvalidRequestException();
-    }
-    int transferred = writeRepository.transferDirectReports(managerId, replacementId);
-    if (transferred > 0) {
-      writeRepository.insertAuditEvent(
-          actorId,
-          managerId,
-          "TRANSFER_REPORTS_TO_" + replacement.id(),
-          UserManagementRules.MANAGER,
-          manager.email());
     }
   }
 
@@ -136,11 +177,21 @@ class ManagerManagementService {
     String name = normalizer.optional(request.name());
     String email = request.email() == null ? null : normalizer.email(request.email());
     String status = request.status() == null ? null : normalizer.status(request.status());
-    if (name == null && email == null && status == null) {
+    ManagerChanges changes = new ManagerChanges(name, email, status, request.storeId());
+    if (changes.isEmpty()) {
       throw new InvalidRequestException();
     }
-    return new ManagerChanges(name, email, status);
+    return changes;
   }
 
-  private record ManagerChanges(String name, String email, String status) {}
+  private record ManagerChanges(String name, String email, String status, Long storeId) {
+    boolean isEmpty() {
+      return name == null && email == null && status == null && storeId == null;
+    }
+
+    boolean requiresStore(UserDTO manager, String resultingStatus) {
+      return UserManagementRules.ACTIVE.equals(resultingStatus)
+          && (manager.storeId() == null || UserManagementRules.INACTIVE.equals(manager.status()));
+    }
+  }
 }

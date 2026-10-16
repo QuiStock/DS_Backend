@@ -16,13 +16,12 @@ public record CreateTeamMemberRequest(
         @NotBlank
         @Size(min = 8, max = 72)
         String password,
-    @Schema(allowableValues = {"FUNCIONARIO", "GERENTE_REGIONAL"}) @NotBlank String role,
-    @Schema(description = "ID SQL de GET /branches (store_id); obrigatório para FUNCIONARIO.")
+    @Schema(allowableValues = {"FUNCIONARIO"}) @NotBlank String role,
+    @Schema(description = "ID SQL da filial do gerente autenticado; obrigatório.")
         @JsonProperty("store_id")
         Long storeId,
     @Schema(
             description =
-                "ID SQL de GET /regions; obrigatório para GERENTE_REGIONAL. A região admite um"
-                    + " único gerente regional ativo.")
+                "Não envie este campo; gerentes cadastram apenas funcionários da própria filial.")
         @JsonProperty("region_id")
         Long regionId) {}

@@ -32,7 +32,13 @@ class UserProfileService {
 
   @Transactional(readOnly = true)
   public List<RegionDTO> listRegions(long actorId) {
-    accessGuard.requireManagerOrAdmin(actorId);
+    var actor = accessGuard.requireManagementRole(actorId);
+    if (UserManagementRules.REGIONAL_MANAGER.equals(actor.role())) {
+      String regionId = Long.toString(accessGuard.requireManagerManagement(actorId));
+      return regionRepository.findActiveRegions().stream()
+          .filter(region -> region.id().equals(regionId))
+          .toList();
+    }
     return regionRepository.findActiveRegions();
   }
 }

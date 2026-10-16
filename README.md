@@ -42,8 +42,9 @@ O contrato da API está em [`api-contract.md`](api-contract.md), o plano da pers
 [`persistence-plan.md`](persistence-plan.md). A API de autenticação está no repositório DS_Auth.
 
 Core também mantém perfis e cadastros de usuários no PostgreSQL. `GET /profile` consulta o
-perfil pelo `sub` do JWT; ADM gerencia `/managers`; Gerente gerencia seus próprios
-`/team-members`. Senhas iniciais são armazenadas com BCrypt cost 12. DS_Auth continua responsável
+perfil pelo `sub` do JWT. ADM gerencia todos os `/managers`; Gerente Regional consulta,
+cadastra, edita e desativa apenas os gerentes de sua região. Gerente gerencia somente os
+funcionários da própria filial em `/team-members`. Senhas iniciais são armazenadas com BCrypt cost 12. DS_Auth continua responsável
 por login e sessão. Os códigos de perfil no SQL são `ADMIN`, `GERENTE`, `GERENTE_REGIONAL` e
 `FUNCIONARIO`.
 
@@ -64,6 +65,27 @@ interrompe com erro explicativo em vez de escolher um registro arbitrariamente.
 é usado como nome inicial.
 Antes de usar `/managers`, o banco precisa conter um `ADMIN` ativo provisionado pelo processo
 seguro de bootstrap. A API não oferece cadastro público do primeiro ADM.
+
+### Hierarquia de usuários
+
+A hierarquia é `GERENTE_REGIONAL → GERENTE → FUNCIONARIO`. O regional tem uma região
+ativa em `region_manager_assignment`; cada gerente e funcionário tem uma filial ativa em
+`user_store`. A região de `store.region_id` determina quais gerentes o regional pode gerenciar.
+`created_by_id` preserva quem cadastrou a conta e não é alterado para transferir responsabilidade.
+
+`POST /managers` exige `store_id`; `PATCH /managers/{id}` aceita esse campo para mudar a filial
+e o exige na reativação. Um regional não pode atribuir uma filial fora da própria região.
+Desativar gerente cuja filial tem funcionários ativos exige `replacement_manager_id` de
+gerente ativo na mesma filial. Os funcionários continuam na filial e a autoria é preservada.
+Contas inativas continuam visíveis ao responsável pela última filial vinculada, permitindo
+reativação sem restaurar o vínculo antigo automaticamente.
+
+Não há tabela ou coluna nova para essa hierarquia. Antes do deploy, associe os gerentes
+existentes às filiais corretas em `user_store`, verifique `store.region_id` e as atribuições
+dos regionais. A API não escolhe esses vínculos automaticamente. Gerentes sem filial não
+acessam a equipe; um ADMIN pode corrigir a associação com `PATCH /managers/{id}`.
+O cadastro de regional não é permitido por `/team-members`; seu provisionamento administrativo
+continua separado desse CRUD.
 
 ## Java 25 e roteamento por ambiente
 

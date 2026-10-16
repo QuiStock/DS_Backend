@@ -17,10 +17,18 @@ public class UserAccountReadRepository {
              rt.name AS region_name
       FROM user_account u
       JOIN role r ON r.id = u.role_id
-      LEFT JOIN user_store us ON us.user_id = u.id AND us.active = TRUE
+      LEFT JOIN LATERAL (
+        SELECT assignment.store_id
+        FROM user_store assignment
+        WHERE assignment.user_id = u.id
+          AND (assignment.active = TRUE OR u.status = 'INACTIVE')
+        ORDER BY assignment.active DESC, assignment.assigned_at DESC, assignment.id DESC
+        LIMIT 1
+      ) us ON TRUE
       LEFT JOIN store s ON s.id = us.store_id
       LEFT JOIN region_manager_assignment rma ON rma.user_id = u.id AND rma.active = TRUE
-      LEFT JOIN region_type rt ON rt.id = rma.region_id
+      LEFT JOIN region_type rt ON rt.id = CASE
+        WHEN r.code = 'GERENTE_REGIONAL' THEN rma.region_id ELSE s.region_id END
       """;
 
   private final NamedParameterJdbcTemplate jdbc;
@@ -51,9 +59,13 @@ public class UserAccountReadRepository {
   }
 
   public Optional<UserDTO> findTeamMember(long id, long managerId) {
+    Long storeId = findUser(managerId).map(UserDTO::storeId).orElse(null);
+    if (storeId == null) {
+      return Optional.empty();
+    }
     return findOne(
-        USER_PROJECTION + " WHERE u.id = :id AND u.created_by_id = :managerId",
-        Map.of("id", id, "managerId", managerId));
+        USER_PROJECTION + " WHERE u.id = :id AND r.code = 'FUNCIONARIO' AND s.id = :storeId",
+        Map.of("id", id, "storeId", storeId));
   }
 
   public List<UserDTO> findManagers() {
@@ -63,10 +75,37 @@ public class UserAccountReadRepository {
         UserAccountReadRepository::mapUser);
   }
 
-  public List<UserDTO> findTeamMembers(long managerId) {
+  public List<UserDTO> findManagersInRegion(long regionId) {
     return jdbc.query(
-        USER_PROJECTION + " WHERE u.created_by_id = :managerId ORDER BY LOWER(u.name), u.id",
-        Map.of("managerId", managerId),
+        USER_PROJECTION
+            + " WHERE r.code = 'GERENTE' AND s.region_id = :regionId ORDER BY LOWER(u.name), u.id",
+        Map.of("regionId", regionId),
+        UserAccountReadRepository::mapUser);
+  }
+
+  public Optional<Long> findActiveRegionalAssignment(long userId) {
+    return jdbc
+        .queryForList(
+            """
+        SELECT rma.region_id FROM region_manager_assignment rma
+        JOIN region_type rt ON rt.id = rma.region_id AND rt.active = TRUE
+        WHERE rma.user_id = :userId AND rma.active = TRUE
+        """,
+            Map.of("userId", userId),
+            Long.class)
+        .stream()
+        .findFirst();
+  }
+
+  public List<UserDTO> findTeamMembers(long managerId) {
+    Long storeId = findUser(managerId).map(UserDTO::storeId).orElse(null);
+    if (storeId == null) {
+      return List.of();
+    }
+    return jdbc.query(
+        USER_PROJECTION
+            + " WHERE r.code = 'FUNCIONARIO' AND s.id = :storeId ORDER BY LOWER(u.name), u.id",
+        Map.of("storeId", storeId),
         UserAccountReadRepository::mapUser);
   }
 

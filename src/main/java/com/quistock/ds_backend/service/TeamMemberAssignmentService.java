@@ -15,34 +15,36 @@ class TeamMemberAssignmentService {
     this.assignmentRepository = assignmentRepository;
   }
 
+  void lockUser(long userId) {
+    assignmentRepository.lockUsers(userId);
+  }
+
   void validateCreate(String role, Long storeId, Long regionId) {
     validateRoleFields(role, storeId, regionId);
-    validateTarget(role, storeId, regionId);
+    validateTarget(storeId);
   }
 
   void assign(long userId, String role, Long storeId, Long regionId) {
-    if (UserManagementRules.EMPLOYEE.equals(role)) {
-      assignmentRepository.insertStoreAssignment(userId, storeId);
-    } else {
-      assignmentRepository.insertRegionAssignment(userId, regionId);
-    }
+    validateRoleFields(role, storeId, regionId);
+    assignmentRepository.insertStoreAssignment(userId, storeId);
   }
 
   void applyUpdate(long userId, UserDTO member, TeamMemberChanges changes) {
     if (UserManagementRules.INACTIVE.equals(changes.status())) {
       assignmentRepository.closeStoreAssignments(userId);
-      assignmentRepository.closeRegionAssignments(userId);
       return;
     }
     if (UserManagementRules.ACTIVE.equals(changes.status())
         && !UserManagementRules.ACTIVE.equals(member.status())) {
-      requireReactivationAssignment(member.role(), changes);
-      validateTarget(member.role(), changes.storeId(), changes.regionId());
+      if (changes.storeId() == null) {
+        throw new InvalidRequestException();
+      }
+      validateTarget(changes.storeId());
       assign(userId, member.role(), changes.storeId(), changes.regionId());
       return;
     }
     if (UserManagementRules.ACTIVE.equals(member.status()) && changes.assignmentRequested()) {
-      validateTarget(member.role(), changes.storeId(), changes.regionId());
+      validateTarget(changes.storeId());
       reassignIfChanged(userId, member, changes);
     }
   }
@@ -51,48 +53,26 @@ class TeamMemberAssignmentService {
     if (request.storeId() != null && !UserManagementRules.EMPLOYEE.equals(role)) {
       throw new InvalidRequestException();
     }
-    if (request.regionId() != null && !UserManagementRules.REGIONAL_MANAGER.equals(role)) {
+    if (request.regionId() != null) {
       throw new InvalidRequestException();
     }
   }
 
   private void validateRoleFields(String role, Long storeId, Long regionId) {
-    boolean employeeInvalid =
-        UserManagementRules.EMPLOYEE.equals(role) && (storeId == null || regionId != null);
-    boolean regionalInvalid =
-        UserManagementRules.REGIONAL_MANAGER.equals(role) && (regionId == null || storeId != null);
-    if (employeeInvalid || regionalInvalid) {
+    if (!UserManagementRules.EMPLOYEE.equals(role) || storeId == null || regionId != null) {
       throw new InvalidRequestException();
     }
   }
 
-  private void validateTarget(String role, Long storeId, Long regionId) {
-    boolean storeMissing =
-        UserManagementRules.EMPLOYEE.equals(role)
-            && (storeId == null || !assignmentRepository.storeIsActive(storeId));
-    boolean regionMissing =
-        UserManagementRules.REGIONAL_MANAGER.equals(role)
-            && (regionId == null || !assignmentRepository.regionIsActive(regionId));
-    if (storeMissing || regionMissing) {
+  private void validateTarget(Long storeId) {
+    if (storeId == null || !assignmentRepository.storeIsActive(storeId)) {
       throw new AssignmentTargetNotFoundException();
-    }
-  }
-
-  private void requireReactivationAssignment(String role, TeamMemberChanges changes) {
-    if (UserManagementRules.EMPLOYEE.equals(role) && changes.storeId() == null) {
-      throw new InvalidRequestException();
-    }
-    if (UserManagementRules.REGIONAL_MANAGER.equals(role) && changes.regionId() == null) {
-      throw new InvalidRequestException();
     }
   }
 
   private void reassignIfChanged(long userId, UserDTO member, TeamMemberChanges changes) {
     if (changes.storeId() != null && !changes.storeId().equals(member.storeId())) {
       assignmentRepository.reassignStore(userId, changes.storeId());
-    }
-    if (changes.regionId() != null && !changes.regionId().equals(member.regionId())) {
-      assignmentRepository.reassignRegion(userId, changes.regionId());
     }
   }
 }

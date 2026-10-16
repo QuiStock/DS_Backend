@@ -40,15 +40,17 @@ class TeamMemberManagementService {
 
   @Transactional(readOnly = true)
   public java.util.List<UserDTO> listTeamMembers(long actorId) {
-    accessGuard.requireRole(actorId, UserManagementRules.MANAGER);
+    accessGuard.requireManagerStore(actorId);
     return readRepository.findTeamMembers(actorId);
   }
 
   @Transactional
   public UserDTO createTeamMember(long actorId, CreateTeamMemberRequest request) {
+    assignmentService.lockUser(actorId);
     accessGuard.requireRole(actorId, UserManagementRules.MANAGER);
     String role = normalizer.teamRole(request.role());
     assignmentService.validateCreate(role, request.storeId(), request.regionId());
+    accessGuard.requireTeamStore(actorId, request.storeId());
     String email = normalizer.email(request.email());
     try {
       long id =
@@ -69,17 +71,23 @@ class TeamMemberManagementService {
 
   @Transactional(readOnly = true)
   public UserDTO getTeamMember(long actorId, long userId) {
-    accessGuard.requireRole(actorId, UserManagementRules.MANAGER);
+    accessGuard.requireManagerStore(actorId);
     return readRepository.findTeamMember(userId, actorId).orElseThrow(UserNotFoundException::new);
   }
 
   @Transactional
   public UserDTO updateTeamMember(long actorId, long userId, UpdateTeamMemberRequest request) {
-    accessGuard.requireRole(actorId, UserManagementRules.MANAGER);
+    assignmentService.lockUser(actorId);
+    accessGuard.requireManagerStore(actorId);
+    readRepository.findTeamMember(userId, actorId).orElseThrow(UserNotFoundException::new);
+    assignmentService.lockUser(userId);
     UserDTO member =
         readRepository.findTeamMember(userId, actorId).orElseThrow(UserNotFoundException::new);
     TeamMemberChanges changes = changes(request);
     validatePatch(member, request, changes);
+    if (changes.storeId() != null) {
+      accessGuard.requireTeamStore(actorId, changes.storeId());
+    }
     if (!hasEffectiveChanges(member, changes)) {
       return member;
     }

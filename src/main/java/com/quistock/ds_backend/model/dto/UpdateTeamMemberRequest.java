@@ -11,13 +11,9 @@ public record UpdateTeamMemberRequest(
     @Schema(description = "Não envie este campo; qualquer role informado é rejeitado com 400.")
         String role,
     @Schema(allowableValues = {"ACTIVE", "INACTIVE"}) String status,
-    @Schema(
-            description =
-                "Filial ativa do funcionário. Nova atribuição obrigatória ao reativar a conta.")
+    @Schema(description = "Filial do gerente autenticado. Obrigatória ao reativar o funcionário.")
         @JsonProperty("store_id")
         Long storeId,
-    @Schema(
-            description =
-                "Região do gerente regional. Nova atribuição obrigatória ao reativar a conta.")
+    @Schema(description = "Não envie este campo; a equipe contém apenas funcionários.")
         @JsonProperty("region_id")
         Long regionId) {}

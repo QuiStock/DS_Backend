@@ -50,8 +50,8 @@ public class TeamMemberController {
   @Operation(
       summary = "Listar minha equipe",
       description =
-          "Exige GERENTE. Consulta apenas contas cujo created_by_id identifica o gerente"
-              + " autenticado.")
+          "Exige GERENTE com filial ativa. Consulta funcionários da própria filial,"
+              + " independentemente de quem os cadastrou.")
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
   public List<UserDTO> listTeamMembers(@AuthenticationPrincipal Jwt jwt) {
     return service.listTeamMembers(actorId(jwt));
@@ -62,8 +62,8 @@ public class TeamMemberController {
   @Operation(
       summary = "Cadastrar membro da equipe",
       description =
-          "Exige GERENTE. FUNCIONARIO exige uma filial ativa (store_id); GERENTE_REGIONAL exige uma"
-              + " região livre (region_id).")
+          "Exige GERENTE. Cadastra apenas FUNCIONARIO com store_id da própria filial ativa."
+              + " Não permite cadastrar GERENTE_REGIONAL.")
   @ApiResponse(responseCode = "201", description = "Recurso criado.")
   @ApiResponse(
       responseCode = "400",
@@ -100,7 +100,7 @@ public class TeamMemberController {
   @GetMapping("/{id}")
   @Operation(
       summary = "Consultar membro da equipe",
-      description = "Exige GERENTE e vínculo de autoria. Contas fora da equipe retornam 404.",
+      description = "Exige GERENTE da mesma filial do funcionário. Fora da equipe retorna 404.",
       parameters = {@Parameter(name = "id", description = "ID SQL do membro da equipe.")})
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
   @ApiResponse(
@@ -117,8 +117,8 @@ public class TeamMemberController {
   @Operation(
       summary = "Atualizar membro da equipe",
       description =
-          "Exige GERENTE. Desativar encerra o vínculo ativo; reativar exige nova atribuição."
-              + " Preserva histórico de filial ou região.",
+          "Exige GERENTE da mesma filial. Desativar encerra o vínculo ativo; reativar exige"
+              + " store_id da própria filial. Preserva histórico e autoria do cadastro.",
       parameters = {@Parameter(name = "id", description = "ID SQL do membro da equipe.")})
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
   @ApiResponse(
