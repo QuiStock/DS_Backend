@@ -1,7 +1,9 @@
 package com.quistock.ds_backend.repository;
 
 import com.quistock.ds_backend.model.dto.BranchDTO;
+import java.sql.Types;
 import java.util.List;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -13,16 +15,18 @@ public class BranchRepository {
     this.jdbc = jdbc;
   }
 
-  public List<BranchDTO> findActiveBranches() {
+  public List<BranchDTO> findActiveBranches(Long regionId) {
     return jdbc.query(
         """
-        SELECT s.id AS store_id, s.erp_id, s.name,
+        SELECT s.id AS store_id, s.erp_id, s.name, s.region_id,
                a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a.postal_code
         FROM store s
         LEFT JOIN store_address a ON a.store_id = s.id
         WHERE s.status = 'ACTIVE'
+          AND (:regionId IS NULL OR s.region_id = :regionId)
         ORDER BY s.name
         """,
+        new MapSqlParameterSource().addValue("regionId", regionId, Types.BIGINT),
         (resultSet, rowNumber) -> {
           String street = resultSet.getString("street");
           String number = resultSet.getString("number");
@@ -36,7 +40,8 @@ public class BranchRepository {
               resultSet.getString("city"),
               resultSet.getString("state"),
               null,
-              null);
+              null,
+              resultSet.getObject("region_id", Long.class));
         });
   }
 

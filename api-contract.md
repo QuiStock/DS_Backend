@@ -657,6 +657,11 @@ Method:
 
 `GET /branches`
 
+Requires an active SQL account identified by the authenticated JWT subject. An active
+`GERENTE_REGIONAL` receives only active branches in their assigned active region; a missing
+or inactive region assignment returns `403`. The region is resolved from SQL, never from
+a client-provided parameter or role claim. Other active roles retain the active-branch list.
+
 Response 200:
 
 ```json
@@ -664,6 +669,7 @@ Response 200:
   {
     "id": "1",
     "store_id": 17,
+    "region_id": 3,
     "name": "Downtown Store",
     "address": null,
     "city": null,
@@ -678,6 +684,8 @@ The ERP provides `region_id`, which the backend synchronizes into the existing r
 It does not currently provide address or coordinates, so those fields are returned as `null`.
 `id` remains the ERP branch code for compatibility; `store_id` is the internal SQL ID required
 by user assignment routes.
+`region_id` is the internal numeric SQL region ID, not the ERP region code. It is nullable
+for branches not yet assigned to a region; such branches are not returned to regional managers.
 
 ---
 

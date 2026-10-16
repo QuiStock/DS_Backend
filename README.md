@@ -60,7 +60,10 @@ normalização e garante uma única filial ativa por usuário. Antes de aplicá-
 dados, resolva e-mails que colidam após trim/lowercase, contas com mais de uma filial ativa e
 contas ativas `FUNCIONARIO`/`GERENTE_REGIONAL` sem sua atribuição obrigatória; a migration
 interrompe com erro explicativo em vez de escolher um registro arbitrariamente.
-`GET /branches` preserva `id` como código ERP e inclui `store_id` interno para associações.
+`GET /branches` exige conta SQL ativa, preserva `id` como código ERP e inclui `store_id` e
+`region_id` numéricos internos. Para `GERENTE_REGIONAL`, retorna apenas filiais ativas da
+própria região ativa; sem atribuição válida retorna 403. O Web deve usar essa lista no
+seletor de filial. Os demais perfis ativos mantêm a consulta de filiais ativas.
 `GET /regions` é alimentada pelo `region_id` do ERP; sem nome de região no ERP, o código também
 é usado como nome inicial.
 Antes de usar `/managers`, o banco precisa conter um `ADMIN` ativo provisionado pelo processo

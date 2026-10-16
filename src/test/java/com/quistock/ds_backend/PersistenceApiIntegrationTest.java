@@ -320,6 +320,10 @@ class PersistenceApiIntegrationTest {
     getAs("/regions", 200, managerToken);
     getAs("/regions", 403, validToken());
     assertThat(getAs("/regions", 200, regionalToken).size()).isEqualTo(1);
+    JsonNode regionalBranches = getAs("/branches", 200, regionalToken);
+    assertThat(regionalBranches.size()).isEqualTo(1);
+    assertThat(regionalBranches.get(0).path("store_id").asLong()).isEqualTo(storeOne);
+    assertThat(regionalBranches.get(0).path("region_id").asLong()).isEqualTo(regionId);
 
     JsonNode employee =
         postAs(
