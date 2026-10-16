@@ -63,9 +63,9 @@ header remains supported for clients that send it explicitly.
 
 | Role | User-management access |
 | --- | --- |
-| `ADMIN` | Manage Gerentes and transfer a Gerente's direct reports during deactivation. |
-| `GERENTE` | Manage only users whose `created_by_id` is this Gerente; may create `FUNCIONARIO` and `GERENTE_REGIONAL`. |
-| `GERENTE_REGIONAL` | No manager/team CRUD access. |
+| `ADMIN` | Manage all Gerentes. |
+| `GERENTE` | Manage only `FUNCIONARIO` accounts assigned to the Gerente's store. |
+| `GERENTE_REGIONAL` | List, create, edit and deactivate Gerentes assigned to stores in the regional manager's active region. |
 | `FUNCIONARIO` | No manager/team CRUD access. |
 
 Before first use, the database must contain at least one active `ADMIN` account created through
@@ -73,8 +73,9 @@ the approved bootstrap process. There is deliberately no public endpoint for cre
 ADM.
 
 Accounts are deactivated with `status: "INACTIVE"`; user records are not deleted. A Gerente
-must have an active replacement Gerente selected by an ADM before its direct reports can be
-transferred and the account deactivated.
+with active employees in the store requires an active replacement Gerente in the same store
+selected by an ADM or the responsible Regional Manager. Employees stay assigned to the store;
+`created_by_id` always preserves who originally created each account.
 
 ---
 
@@ -100,12 +101,12 @@ Response 200:
   "role": "GERENTE",
   "status": "ACTIVE",
   "profile_photo_url": null,
-  "store_id": null,
-  "store_code": null,
-  "store_name": null,
-  "region_id": null,
-  "region_code": null,
-  "region_name": null
+  "store_id": 17,
+  "store_code": "FIL001",
+  "store_name": "Filial Centro",
+  "region_id": 3,
+  "region_code": "REGION-NORTH",
+  "region_name": "REGION-NORTH"
 }
 ```
 
@@ -115,8 +116,8 @@ An inactive or missing account returns `403 Forbidden`.
 
 Method: `GET /regions`
 
-Available to `ADMIN` and `GERENTE`. Only active ERP-backed regions are returned. `id` is the
-internal SQL identifier to send as `region_id` when provisioning a Regional Manager.
+Available to `ADMIN`, `GERENTE` and `GERENTE_REGIONAL`. Only active ERP-backed regions are
+returned; a Regional Manager receives only their own active region. `id` is the internal SQL identifier.
 
 ```json
 [{"id":"3","code":"REGION-NORTH","name":"REGION-NORTH"}]
@@ -125,43 +126,55 @@ internal SQL identifier to send as `region_id` when provisioning a Regional Mana
 The ERP currently supplies `region_id` but no display name, so `name` initially mirrors the
 ERP code.
 
-## 0.3 Manage Gerentes (ADM web)
+## 0.3 Manage Gerentes (ADM and Regional Manager web)
 
-All routes require the `ADMIN` role.
+All routes require an active `ADMIN` or `GERENTE_REGIONAL`. The ADM has global access; a
+Regional Manager must have an active region assignment and can only access Gerentes in that
+region, determined by `user_store → store.region_id`. Out-of-scope items return `404`;
+attempting to assign a store outside the region returns `403`.
 
 | Method and route | Behavior |
 | --- | --- |
 | `GET /managers` | List active and inactive Gerentes. |
 | `POST /managers` | Create a Gerente with a generic initial password. |
 | `GET /managers/{id}` | Read one Gerente. |
-| `PATCH /managers/{id}` | Update name/email or activate/deactivate the Gerente. |
+| `PATCH /managers/{id}` | Update name/email/store or activate/deactivate the Gerente. |
 
 Create request:
 
 ```json
-{"name":"Joao Silva","email":"joao@example.com","password":"InitialPass123"}
+{"name":"Joao Silva","email":"joao@example.com","password":"InitialPass123","store_id":17}
 ```
 
-When a Gerente has direct reports, deactivation requires an active replacement Gerente. In one
-transaction, Core transfers each direct report's `created_by_id` to the replacement and marks
-the old Gerente inactive:
+`store_id` is required and must identify an active store with an active region. Each active
+Gerente has exactly one active store assignment. Reassignment closes the old assignment and
+creates a history row; reactivation requires an explicit `store_id`.
+
+When a Gerente's store has active employees, deactivation requires an active replacement
+Gerente assigned to the same store. Core closes the old Gerente's active store assignment and
+marks the account inactive in one transaction. Employees stay in the store, and account
+creation authors are not rewritten:
 
 ```json
 {"status":"INACTIVE","replacement_manager_id":42}
 ```
 
 No `DELETE` route is provided; deactivation preserves account and assignment history.
+Inactive accounts are scoped using their most recent store assignment, allowing the
+responsible Regional Manager to read and reactivate them. Existing Gerentes without a store
+must be assigned by an ADM before they can access the team API. No new schema objects are required.
 
 ## 0.4 Manage team members (Gerente web)
 
-All routes require an active `GERENTE`. The list and item routes are restricted to accounts
-whose `created_by_id` matches the current Gerente.
+All routes require an active `GERENTE` with an active store assignment. The list and item
+routes return only `FUNCIONARIO` accounts in that store, regardless of who created them.
+For inactive employees, the most recent store assignment determines the scope.
 
 | Method and route | Behavior |
 | --- | --- |
-| `GET /team-members` | List direct reports, including inactive accounts. |
-| `POST /team-members` | Create a `FUNCIONARIO` or `GERENTE_REGIONAL`. |
-| `GET /team-members/{id}` | Read one direct report. |
+| `GET /team-members` | List store employees, including inactive accounts. |
+| `POST /team-members` | Create a `FUNCIONARIO` in the Gerente's store. |
+| `GET /team-members/{id}` | Read one employee in the Gerente's store. |
 | `PATCH /team-members/{id}` | Update name/email/status or assignment. |
 
 Employee request (the `store_id` comes from `GET /branches`):
@@ -176,27 +189,16 @@ Employee request (the `store_id` comes from `GET /branches`):
 }
 ```
 
-Regional Manager request (the `region_id` comes from `GET /regions`):
-
-```json
-{
-  "name":"Pedro Lima",
-  "email":"pedro@example.com",
-  "password":"InitialPass123",
-  "role":"GERENTE_REGIONAL",
-  "region_id":3
-}
-```
-
-A `FUNCIONARIO` must have exactly one active store assignment. Changing `store_id` closes the
-previous assignment and creates a new history row in the same transaction. A
-`GERENTE_REGIONAL` has one active region assignment, and a region can have only one active
-Regional Manager. Deactivation closes the active assignment; reactivation requires a new
-`store_id` or `region_id`.
+A `FUNCIONARIO` must have exactly one active store assignment. Submitted `store_id` must match
+the authenticated Gerente's store; cross-store assignments return `403`. Deactivation closes
+the active assignment; reactivation requires an explicit `store_id` for that same store.
+`GERENTE_REGIONAL` and `region_id` are rejected with `400` by `/team-members`.
+Regional Manager accounts are provisioned separately through the administrative process;
+each has one active region assignment, and a region has only one active Regional Manager.
 
 Create returns `201`; reads/updates return `200`. Invalid fields or missing required assignments
 return `400`, missing users/branches/regions or out-of-scope team members return `404`, duplicate
-email or occupied active region returns `409`, and role violations return `403`.
+email or conflicting active assignment returns `409`, and role/scope violations return `403`.
 
 ---
 

@@ -53,22 +53,6 @@ public class UserAccountWriteRepository {
             .addValue("status", status));
   }
 
-  public int countDirectReports(long managerId) {
-    Integer count =
-        jdbc.queryForObject(
-            "SELECT COUNT(*) FROM user_account WHERE created_by_id = :managerId",
-            java.util.Map.of("managerId", managerId),
-            Integer.class);
-    return count == null ? 0 : count;
-  }
-
-  public int transferDirectReports(long previousManagerId, long replacementManagerId) {
-    return jdbc.update(
-        "UPDATE user_account SET created_by_id = :replacement, updated_at = CURRENT_TIMESTAMP "
-            + "WHERE created_by_id = :previous",
-        java.util.Map.of("previous", previousManagerId, "replacement", replacementManagerId));
-  }
-
   public void insertAuditEvent(
       long actorId, long targetId, String action, String role, String email) {
     jdbc.update(

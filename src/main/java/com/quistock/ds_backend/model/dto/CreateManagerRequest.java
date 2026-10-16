@@ -1,8 +1,11 @@
 package com.quistock.ds_backend.model.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 public record CreateManagerRequest(
@@ -14,4 +17,11 @@ public record CreateManagerRequest(
             description = "Senha inicial, armazenada como BCrypt; máximo de 72 bytes UTF-8.")
         @NotBlank
         @Size(min = 8, max = 72)
-        String password) {}
+        String password,
+    @Schema(
+            description =
+                "Filial ativa do gerente; deve pertencer à região do regional autenticado.")
+        @JsonProperty("store_id")
+        @NotNull
+        @Positive
+        Long storeId) {}

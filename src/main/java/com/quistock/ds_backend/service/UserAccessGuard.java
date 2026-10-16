@@ -21,10 +21,11 @@ class UserAccessGuard {
     return actor;
   }
 
-  Actor requireManagerOrAdmin(long actorId) {
+  Actor requireManagementRole(long actorId) {
     Actor actor = requireActiveActor(actorId);
     if (!UserManagementRules.ADMIN.equals(actor.role())
-        && !UserManagementRules.MANAGER.equals(actor.role())) {
+        && !UserManagementRules.MANAGER.equals(actor.role())
+        && !UserManagementRules.REGIONAL_MANAGER.equals(actor.role())) {
       throw new AccessDeniedException("This role cannot list regions.");
     }
     return actor;
@@ -32,6 +33,35 @@ class UserAccessGuard {
 
   Actor requireRoleOrActive(long actorId) {
     return requireActiveActor(actorId);
+  }
+
+  Long requireManagerManagement(long actorId) {
+    Actor actor = requireActiveActor(actorId);
+    if (UserManagementRules.ADMIN.equals(actor.role())) {
+      return null;
+    }
+    if (!UserManagementRules.REGIONAL_MANAGER.equals(actor.role())) {
+      throw new AccessDeniedException(
+          "Only administrators and regional managers can manage managers.");
+    }
+    return readRepository
+        .findActiveRegionalAssignment(actorId)
+        .orElseThrow(() -> new AccessDeniedException("The regional manager has no active region."));
+  }
+
+  long requireManagerStore(long actorId) {
+    requireRole(actorId, UserManagementRules.MANAGER);
+    return readRepository
+        .findUser(actorId)
+        .map(com.quistock.ds_backend.model.dto.UserDTO::storeId)
+        .orElseThrow(
+            () -> new AccessDeniedException("The manager has no active store assignment."));
+  }
+
+  void requireTeamStore(long actorId, long storeId) {
+    if (requireManagerStore(actorId) != storeId) {
+      throw new AccessDeniedException("The store is outside the manager's scope.");
+    }
   }
 
   private Actor requireActiveActor(long actorId) {

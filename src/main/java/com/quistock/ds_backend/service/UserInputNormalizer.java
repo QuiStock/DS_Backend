@@ -39,8 +39,7 @@ class UserInputNormalizer {
       throw new InvalidRequestException();
     }
     String normalized = value.trim().toUpperCase(Locale.ROOT);
-    if (!UserManagementRules.EMPLOYEE.equals(normalized)
-        && !UserManagementRules.REGIONAL_MANAGER.equals(normalized)) {
+    if (!UserManagementRules.EMPLOYEE.equals(normalized)) {
       throw new InvalidRequestException();
     }
     return normalized;

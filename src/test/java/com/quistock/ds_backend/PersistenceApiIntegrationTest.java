@@ -298,25 +298,36 @@ class PersistenceApiIntegrationTest {
   private String assertUserManagementRoutes() throws Exception {
     String adminToken = tokenFor(1002L, "admin@test.example");
     String managerToken = tokenFor(1003L, "manager@test.example");
+    JsonNode branches = get("/branches", 200);
+    long storeOne = branches.get(0).path("store_id").asLong();
+    long storeTwo = branches.get(1).path("store_id").asLong();
+    jdbc.update("INSERT INTO user_store (user_id, store_id) VALUES (1003, ?)", storeOne);
+    long regionId =
+        jdbc.queryForObject("SELECT region_id FROM store WHERE id = ?", Long.class, storeOne);
+    jdbc.update(
+        "INSERT INTO user_account (id, role_id, name, email, password_hash) "
+            + "SELECT 1004, id, 'Regional Manager', 'regional@test.example', 'test-hash' "
+            + "FROM role WHERE code = 'GERENTE_REGIONAL'");
+    jdbc.update(
+        "INSERT INTO region_manager_assignment (user_id, region_id) VALUES (1004, ?)", regionId);
+    String regionalToken = tokenFor(1004L, "regional@test.example");
 
     assertThat(getAs("/profile", 200, managerToken).path("role").asString()).isEqualTo("GERENTE");
     assertThat(getAs("/managers", 200, adminToken).size()).isEqualTo(1);
-    assertThat(getAs("/managers/1003", 200, adminToken).path("email").asString())
+    assertThat(getAs("/managers/1003", 200, regionalToken).path("email").asString())
         .isEqualTo("manager@test.example");
     getAs("/managers", 403, managerToken);
     getAs("/regions", 200, managerToken);
     getAs("/regions", 403, validToken());
+    assertThat(getAs("/regions", 200, regionalToken).size()).isEqualTo(1);
 
-    JsonNode branches = get("/branches", 200);
-    long storeOne = branches.get(0).path("store_id").asLong();
-    long storeTwo = branches.get(1).path("store_id").asLong();
     JsonNode employee =
         postAs(
             "/team-members",
             """
-            {"name":"Store Employee","email":"employee@test.example","password":"GenericPass123",
-             "role":"FUNCIONARIO","store_id":%d}
-            """
+        {"name":"Store Employee","email":"employee@test.example","password":"GenericPass123",
+         "role":"FUNCIONARIO","store_id":%d}
+        """
                 .formatted(storeOne),
             201,
             managerToken);
@@ -340,22 +351,27 @@ class PersistenceApiIntegrationTest {
         .isEqualTo(1003L);
     postAs(
         "/team-members",
-        "{\"name\":\"Missing Store\",\"email\":\"missing-store@test.example\","
-            + "\"password\":\"GenericPass123\",\"role\":\"FUNCIONARIO\"}",
+        """
+        {"name":"Missing Store","email":"missing-store@test.example",
+         "password":"GenericPass123","role":"FUNCIONARIO"}
+        """,
         400,
         managerToken);
     postAs(
         "/team-members",
-        "{\"name\":\"Duplicate Employee\",\"email\":\"EMPLOYEE@test.example\","
-            + "\"password\":\"GenericPass123\",\"role\":\"FUNCIONARIO\",\"store_id\":"
-            + storeOne
-            + "}",
+        """
+        {"name":"Duplicate Employee","email":"EMPLOYEE@test.example",
+         "password":"GenericPass123","role":"FUNCIONARIO","store_id":%d}
+        """
+            .formatted(storeOne),
         409,
         managerToken);
     postAs(
         "/team-members",
-        "{\"name\":\"Missing Store\",\"email\":\"missing-store-id@test.example\","
-            + "\"password\":\"GenericPass123\",\"role\":\"FUNCIONARIO\",\"store_id\":999999}",
+        """
+        {"name":"Missing Store","email":"missing-store-id@test.example",
+         "password":"GenericPass123","role":"FUNCIONARIO","store_id":999999}
+        """,
         404,
         managerToken);
 
@@ -367,43 +383,16 @@ class PersistenceApiIntegrationTest {
                 "SELECT COUNT(*) FROM region_type WHERE code IN ('REGION-NORTH', 'REGION-SOUTH')",
                 Integer.class))
         .isEqualTo(2);
-    long regionId = regions.get(0).path("id").asLong();
-    JsonNode regionalManager =
-        postAs(
-            "/team-members",
-            """
-            {"name":"Regional Manager","email":"regional@test.example","password":"GenericPass123",
-             "role":"GERENTE_REGIONAL","region_id":%d}
-            """
-                .formatted(regionId),
-            201,
-            managerToken);
-    String regionalManagerId = regionalManager.path("id").asString();
-    long secondRegionId = regions.get(1).path("id").asLong();
-    assertThat(
-            patchAs(
-                    "/team-members/" + regionalManagerId,
-                    "{\"region_id\":" + secondRegionId + "}",
-                    200,
-                    managerToken)
-                .path("region_id")
-                .asLong())
-        .isEqualTo(secondRegionId);
     postAs(
         "/team-members",
         """
-        {"name":"Duplicate Regional Manager","email":"regional-duplicate@test.example",
-         "password":"GenericPass123","role":"GERENTE_REGIONAL","region_id":%d}
+        {"name":"Regional Manager","email":"new-regional@test.example","password":"GenericPass123",
+         "role":"GERENTE_REGIONAL","region_id":%d}
         """
-            .formatted(secondRegionId),
-        409,
+            .formatted(regionId),
+        400,
         managerToken);
-    postAs(
-        "/team-members",
-        "{\"name\":\"Missing Region\",\"email\":\"missing-region@test.example\","
-            + "\"password\":\"GenericPass123\",\"role\":\"GERENTE_REGIONAL\",\"region_id\":999999}",
-        404,
-        managerToken);
+    patchAs("/team-members/1004", "{\"status\":\"INACTIVE\"}", 404, managerToken);
     postAs(
         "/team-members",
         """
@@ -414,8 +403,7 @@ class PersistenceApiIntegrationTest {
         400,
         managerToken);
     getAs("/team-members/1002", 404, managerToken);
-
-    patchAs("/team-members/" + employeeId, "{\"store_id\":" + storeTwo + "}", 200, managerToken);
+    patchAs("/team-members/" + employeeId, "{\"store_id\":" + storeTwo + "}", 403, managerToken);
     assertThat(
             jdbc.queryForObject(
                 "SELECT COUNT(*) FROM user_store WHERE user_id = ? AND active = TRUE",
@@ -431,41 +419,36 @@ class PersistenceApiIntegrationTest {
         .isZero();
     patchAs(
         "/team-members/" + employeeId,
-        "{\"status\":\"ACTIVE\",\"store_id\":" + storeTwo + "}",
+        "{\"status\":\"ACTIVE\",\"store_id\":" + storeOne + "}",
         200,
         managerToken);
     patchAs("/team-members/" + employeeId, "{\"status\":\"UNKNOWN\"}", 400, managerToken);
     patchAs("/team-members/" + employeeId, "{\"role\":\"GERENTE\"}", 400, managerToken);
 
-    patchAs("/team-members/" + regionalManagerId, "{\"status\":\"INACTIVE\"}", 200, managerToken);
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT COUNT(*) FROM region_manager_assignment WHERE user_id = ? AND active ="
-                    + " TRUE",
-                Integer.class,
-                Long.parseLong(regionalManagerId)))
-        .isZero();
-
     JsonNode replacement =
         postAs(
             "/managers",
             """
-            {"name":"Replacement Manager","email":"replacement@test.example","password":"GenericPass123"}
-            """,
+        {"name":"Replacement Manager","email":"replacement@test.example",
+         "password":"GenericPass123","store_id":%d}
+        """
+                .formatted(storeOne),
             201,
-            adminToken);
+            regionalToken);
     String replacementId = replacement.path("id").asString();
     assertThat(replacement.has("password_hash")).isFalse();
     postAs(
         "/managers",
         """
-        {"name":"Duplicate Email","email":"REPLACEMENT@test.example","password":"GenericPass123"}
-        """,
+        {"name":"Duplicate Email","email":"REPLACEMENT@test.example",
+         "password":"GenericPass123","store_id":%d}
+        """
+            .formatted(storeOne),
         409,
         adminToken);
     patchAs("/managers/1003", "{\"role\":\"ADMIN\"}", 400, adminToken);
     assertThat(
-            patchAs("/managers/1003", "{\"status\":\"INACTIVE\"}", 400, adminToken)
+            patchAs("/managers/1003", "{\"status\":\"INACTIVE\"}", 400, regionalToken)
                 .path("error")
                 .asString())
         .isEqualTo("INVALID_REQUEST");
@@ -473,13 +456,13 @@ class PersistenceApiIntegrationTest {
         "/managers/1003",
         "{\"status\":\"INACTIVE\",\"replacement_manager_id\":" + replacementId + "}",
         200,
-        adminToken);
+        regionalToken);
     assertThat(
             jdbc.queryForObject(
-                "SELECT COUNT(*) FROM user_account WHERE created_by_id = ?",
-                Integer.class,
-                Long.parseLong(replacementId)))
-        .isEqualTo(2);
+                "SELECT created_by_id FROM user_account WHERE id = ?",
+                Long.class,
+                Long.parseLong(employeeId)))
+        .isEqualTo(1003L);
     getAs("/team-members", 403, managerToken);
     getAs("/profile", 403, managerToken);
     assertThat(
@@ -488,7 +471,7 @@ class PersistenceApiIntegrationTest {
                     200,
                     tokenFor(Long.parseLong(replacementId), "replacement@test.example"))
                 .size())
-        .isEqualTo(2);
+        .isEqualTo(1);
     return replacementId;
   }
 

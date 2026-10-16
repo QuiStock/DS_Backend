@@ -49,7 +49,9 @@ public class ManagerController {
   @GetMapping
   @Operation(
       summary = "Listar gerentes",
-      description = "Exige ADMIN. Inclui contas ativas e inativas.")
+      description =
+          "ADMIN consulta todos; GERENTE_REGIONAL consulta apenas gerentes de sua região."
+              + " Inclui contas inativas pela última filial vinculada.")
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
   public List<UserDTO> listManagers(@AuthenticationPrincipal Jwt jwt) {
     return service.listManagers(actorId(jwt));
@@ -59,13 +61,21 @@ public class ManagerController {
   @ResponseStatus(HttpStatus.CREATED)
   @Operation(
       summary = "Cadastrar gerente",
-      description = "Exige ADMIN. Armazena senha inicial como BCrypt e define GERENTE.")
+      description =
+          "Exige ADMIN ou GERENTE_REGIONAL. Exige store_id de filial ativa com região;"
+              + " o regional só cadastra na própria região. Define GERENTE e salva senha como BCrypt.")
   @ApiResponse(responseCode = "201", description = "Recurso criado.")
   @ApiResponse(
       responseCode = "400",
       description =
           "Parâmetros ou corpo inválidos. Credenciais de autenticação ambíguas também retornam"
               + " 400.",
+      content =
+          @Content(
+              schema = @Schema(implementation = com.quistock.ds_backend.model.dto.ErrorDTO.class)))
+  @ApiResponse(
+      responseCode = "404",
+      description = "Filial ativa com região não encontrada.",
       content =
           @Content(
               schema = @Schema(implementation = com.quistock.ds_backend.model.dto.ErrorDTO.class)))
@@ -90,7 +100,7 @@ public class ManagerController {
   @GetMapping("/{id}")
   @Operation(
       summary = "Consultar gerente",
-      description = "Exige ADMIN.",
+      description = "Exige ADMIN ou GERENTE_REGIONAL da região da filial do gerente.",
       parameters = {@Parameter(name = "id", description = "ID SQL do gerente.")})
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
   @ApiResponse(
@@ -107,8 +117,9 @@ public class ManagerController {
   @Operation(
       summary = "Atualizar gerente",
       description =
-          "Exige ADMIN. Desativação com subordinados exige replacement_manager_id ativo; transfere"
-              + " a equipe na mesma transação.",
+          "Exige ADMIN ou GERENTE_REGIONAL da região. Filial de destino deve estar na mesma região"
+              + " para o regional. Reativação exige store_id. Desativação com funcionários ativos"
+              + " exige replacement_manager_id ativo na mesma filial. Preserva autoria e histórico.",
       parameters = {@Parameter(name = "id", description = "ID SQL do gerente.")})
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
   @ApiResponse(
