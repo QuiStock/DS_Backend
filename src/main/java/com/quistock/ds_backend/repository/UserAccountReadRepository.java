@@ -50,6 +50,20 @@ public class UserAccountReadRepository {
     return result.stream().findFirst();
   }
 
+  public Optional<Long> findActiveStoreAssignment(long userId) {
+    return jdbc
+        .queryForList(
+            """
+        SELECT us.store_id FROM user_store us
+        JOIN store s ON s.id = us.store_id AND s.status = 'ACTIVE'
+        WHERE us.user_id = :userId AND us.active = TRUE
+        """,
+            Map.of("userId", userId),
+            Long.class)
+        .stream()
+        .findFirst();
+  }
+
   public Optional<UserDTO> findUser(long id) {
     return findOne(USER_PROJECTION + " WHERE u.id = :id", Map.of("id", id));
   }
@@ -68,18 +82,13 @@ public class UserAccountReadRepository {
         Map.of("id", id, "storeId", storeId));
   }
 
-  public List<UserDTO> findManagers() {
-    return jdbc.query(
-        USER_PROJECTION + " WHERE r.code = 'GERENTE' ORDER BY LOWER(u.name), u.id",
-        Map.of(),
-        UserAccountReadRepository::mapUser);
-  }
-
-  public List<UserDTO> findManagersInRegion(long regionId) {
+  public List<UserDTO> findManagers(StoreScope scope) {
     return jdbc.query(
         USER_PROJECTION
-            + " WHERE r.code = 'GERENTE' AND s.region_id = :regionId ORDER BY LOWER(u.name), u.id",
-        Map.of("regionId", regionId),
+            + " WHERE r.code = 'GERENTE'"
+            + StoreScope.SQL
+            + " ORDER BY LOWER(u.name), u.id",
+        scope.parameters(),
         UserAccountReadRepository::mapUser);
   }
 

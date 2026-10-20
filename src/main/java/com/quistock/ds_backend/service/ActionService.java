@@ -8,6 +8,7 @@ import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
 import com.quistock.ds_backend.model.dto.UpdateActionStatusRequest;
 import com.quistock.ds_backend.repository.ActionRepository;
+import com.quistock.ds_backend.repository.StoreScope;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -32,8 +33,11 @@ public class ActionService {
   }
 
   public GenerateActionsResponse generateActions(
-      String flowId, LocalDate promotionValidFrom, LocalDate promotionValidUntil, long actorId) {
-    FlowDTO flow = flowService.findFlowById(flowId);
+      String flowId,
+      LocalDate promotionValidFrom,
+      LocalDate promotionValidUntil,
+      StoreScope scope) {
+    FlowDTO flow = flowService.findFlowById(flowId, scope);
     ActionRule rule = FLOW_ACTIONS.get(flow.flowType());
     if (rule == null) {
       throw new IllegalArgumentException("Unsupported flow type: " + flow.flowType());
@@ -53,28 +57,29 @@ public class ActionService {
             rule.justification(),
             promotionValidFrom,
             promotionValidUntil,
-            actorId);
+            scope);
     return new GenerateActionsResponse(flow.id(), List.of(action));
   }
 
-  public List<ActionListItemDTO> listActions() {
-    return listActions(null, null, null);
+  public List<ActionListItemDTO> listActions(StoreScope scope) {
+    return listActions(null, null, null, scope);
   }
 
-  public List<ActionListItemDTO> listActions(String status, String actionType, String flowId) {
+  public List<ActionListItemDTO> listActions(
+      String status, String actionType, String flowId, StoreScope scope) {
     ActionRequestValidator.validateFilters(status, actionType);
-    return actionRepository.findAll(status, actionType, flowId);
+    return actionRepository.findAll(status, actionType, flowId, scope);
   }
 
   public ActionStatusResponse updateActionStatus(
-      String actionId, UpdateActionStatusRequest request, long actorId) {
+      String actionId, UpdateActionStatusRequest request, StoreScope scope) {
     ActionRequestValidator.validateStatus(request);
-    String actionType = actionRepository.findTypeById(actionId);
+    String actionType = actionRepository.findTypeById(actionId, scope);
     if (actionType == null) {
       throw new ActionNotFoundException(actionId);
     }
     ActionRequestValidator.validateFinalDates(actionType, request.status(), request);
-    return actionRepository.updateStatus(actionId, request, actorId);
+    return actionRepository.updateStatus(actionId, request, scope);
   }
 
   private record ActionRule(String actionType, String justification) {}

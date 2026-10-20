@@ -123,7 +123,8 @@ class CookieChatApiIntegrationTest {
   void bearerStillWorksWithoutCsrfAndPreservesTheConversationString() throws Exception {
     HttpResponse<String> response =
         bearerChat(
-            "{\"message\":\"continuar\",\"conversation_id\":\"existing-conversation\",\"is_resuming_conversation\":true}");
+            "{\"message\":\"continuar\",\"conversation_id\":\"existing-conversation\","
+                + "\"is_resuming_conversation\":true}");
     assertThat(response.statusCode()).isEqualTo(200);
     assertThat(JSON.readTree(response.body()).path("conversation_id").asString())
         .isEqualTo("existing-conversation");

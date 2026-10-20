@@ -16,6 +16,7 @@ import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
 import com.quistock.ds_backend.model.dto.UpdateActionStatusRequest;
 import com.quistock.ds_backend.repository.ActionRepository;
+import com.quistock.ds_backend.repository.StoreScope;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -24,7 +25,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class ActionServiceTest {
-  private static final long ACTOR_ID = 1001L;
+  private static final StoreScope SCOPE = new StoreScope(1001L, null, null);
   private static final LocalDate PROMOTION_START = LocalDate.of(2026, 10, 1);
   private static final LocalDate PROMOTION_END = LocalDate.of(2026, 10, 7);
 
@@ -43,18 +44,18 @@ class ActionServiceTest {
   void shouldGeneratePromotionForLowFlow() {
     FlowDTO flow = flow("101", "LOW");
     ActionDTO action = action("501", "PROMOTION", "GENERATED");
-    when(flowService.findFlowById("101")).thenReturn(flow);
+    when(flowService.findFlowById("101", SCOPE)).thenReturn(flow);
     when(actionRepository.createGenerated(
             flow,
             "PROMOTION",
             "Expiration or excess-stock risk: create a promotion.",
             PROMOTION_START,
             PROMOTION_END,
-            ACTOR_ID))
+            SCOPE))
         .thenReturn(action);
 
     GenerateActionsResponse response =
-        actionService.generateActions("101", PROMOTION_START, PROMOTION_END, ACTOR_ID);
+        actionService.generateActions("101", PROMOTION_START, PROMOTION_END, SCOPE);
 
     assertThat(response.flowId()).isEqualTo("101");
     assertThat(response.generatedActions()).containsExactly(action);
@@ -64,13 +65,13 @@ class ActionServiceTest {
   void shouldGenerateStockOrderForHighFlow() {
     FlowDTO flow = flow("101", "HIGH");
     ActionDTO action = action("501", "ORDER", "GENERATED");
-    when(flowService.findFlowById("101")).thenReturn(flow);
+    when(flowService.findFlowById("101", SCOPE)).thenReturn(flow);
     when(actionRepository.createGenerated(
-            flow, "ORDER", "Stockout risk: replenish stock.", null, null, ACTOR_ID))
+            flow, "ORDER", "Stockout risk: replenish stock.", null, null, SCOPE))
         .thenReturn(action);
 
     ActionDTO generated =
-        actionService.generateActions("101", null, null, ACTOR_ID).generatedActions().get(0);
+        actionService.generateActions("101", null, null, SCOPE).generatedActions().get(0);
 
     assertThat(generated.actionType()).isEqualTo("ORDER");
     assertThat(generated.status()).isEqualTo("GENERATED");
@@ -78,26 +79,27 @@ class ActionServiceTest {
 
   @Test
   void shouldGenerateNoActionForMediumFlow() {
-    when(flowService.findFlowById("101")).thenReturn(flow("101", "MEDIUM"));
+    when(flowService.findFlowById("101", SCOPE)).thenReturn(flow("101", "MEDIUM"));
 
-    assertThat(actionService.generateActions("101", null, null, ACTOR_ID).generatedActions())
+    assertThat(actionService.generateActions("101", null, null, SCOPE).generatedActions())
         .isEmpty();
   }
 
   @Test
   void shouldPropagateFlowNotFound() {
-    when(flowService.findFlowById("UNKNOWN")).thenThrow(new FlowNotFoundException("UNKNOWN"));
+    when(flowService.findFlowById("UNKNOWN", SCOPE))
+        .thenThrow(new FlowNotFoundException("UNKNOWN"));
 
-    assertThatThrownBy(() -> actionService.generateActions("UNKNOWN", null, null, ACTOR_ID))
+    assertThatThrownBy(() -> actionService.generateActions("UNKNOWN", null, null, SCOPE))
         .isInstanceOf(FlowNotFoundException.class);
   }
 
   @Test
   void shouldRejectPromotionDatesForNonPromotionFlow() {
-    when(flowService.findFlowById("101")).thenReturn(flow("101", "HIGH"));
+    when(flowService.findFlowById("101", SCOPE)).thenReturn(flow("101", "HIGH"));
 
     assertThatThrownBy(
-            () -> actionService.generateActions("101", PROMOTION_START, PROMOTION_END, ACTOR_ID))
+            () -> actionService.generateActions("101", PROMOTION_START, PROMOTION_END, SCOPE))
         .isInstanceOf(InvalidRequestException.class);
   }
 
@@ -114,31 +116,33 @@ class ActionServiceTest {
             PROMOTION_START,
             PROMOTION_END,
             null);
-    when(actionRepository.findAll("GENERATED", "PROMOTION", "101")).thenReturn(List.of(action));
+    when(actionRepository.findAll("GENERATED", "PROMOTION", "101", SCOPE))
+        .thenReturn(List.of(action));
 
-    assertThat(actionService.listActions("GENERATED", "PROMOTION", "101")).containsExactly(action);
+    assertThat(actionService.listActions("GENERATED", "PROMOTION", "101", SCOPE))
+        .containsExactly(action);
   }
 
   @Test
   void shouldRejectUnsupportedStatusFilter() {
-    assertThatThrownBy(() -> actionService.listActions("ACTIVE", null, null))
+    assertThatThrownBy(() -> actionService.listActions("ACTIVE", null, null, SCOPE))
         .isInstanceOf(InvalidRequestException.class);
   }
 
   @Test
   void shouldRejectUnsupportedActionTypeFilter() {
-    assertThatThrownBy(() -> actionService.listActions(null, "DISCOUNT", null))
+    assertThatThrownBy(() -> actionService.listActions(null, "DISCOUNT", null, SCOPE))
         .isInstanceOf(InvalidRequestException.class);
   }
 
   @Test
   void shouldUpdateActionStatus() {
     UpdateActionStatusRequest request = new UpdateActionStatusRequest("APPROVED");
-    when(actionRepository.findTypeById("501")).thenReturn("PROMOTION");
-    when(actionRepository.updateStatus("501", request, ACTOR_ID))
+    when(actionRepository.findTypeById("501", SCOPE)).thenReturn("PROMOTION");
+    when(actionRepository.updateStatus("501", request, SCOPE))
         .thenReturn(new ActionStatusResponse("501", "APPROVED"));
 
-    ActionStatusResponse response = actionService.updateActionStatus("501", request, ACTOR_ID);
+    ActionStatusResponse response = actionService.updateActionStatus("501", request, SCOPE);
 
     assertThat(response.id()).isEqualTo("501");
     assertThat(response.status()).isEqualTo("APPROVED");
@@ -148,9 +152,9 @@ class ActionServiceTest {
   void shouldRejectFinalPromotionDatesForNonPromotionActions() {
     UpdateActionStatusRequest request =
         new UpdateActionStatusRequest("APPROVED", null, PROMOTION_START, PROMOTION_END);
-    when(actionRepository.findTypeById("501")).thenReturn("ORDER");
+    when(actionRepository.findTypeById("501", SCOPE)).thenReturn("ORDER");
 
-    assertThatThrownBy(() -> actionService.updateActionStatus("501", request, ACTOR_ID))
+    assertThatThrownBy(() -> actionService.updateActionStatus("501", request, SCOPE))
         .isInstanceOf(InvalidRequestException.class);
   }
 
@@ -159,7 +163,7 @@ class ActionServiceTest {
     assertThatThrownBy(
             () ->
                 actionService.updateActionStatus(
-                    "501", new UpdateActionStatusRequest("INVALID"), ACTOR_ID))
+                    "501", new UpdateActionStatusRequest("INVALID"), SCOPE))
         .isInstanceOf(InvalidActionStatusException.class);
   }
 
@@ -167,7 +171,7 @@ class ActionServiceTest {
   void shouldRequireJustificationWhenRejectingAction() {
     UpdateActionStatusRequest request = new UpdateActionStatusRequest("REJECTED", " ", null, null);
 
-    assertThatThrownBy(() -> actionService.updateActionStatus("501", request, ACTOR_ID))
+    assertThatThrownBy(() -> actionService.updateActionStatus("501", request, SCOPE))
         .isInstanceOf(InvalidRequestException.class);
   }
 
@@ -176,7 +180,7 @@ class ActionServiceTest {
     assertThatThrownBy(
             () ->
                 actionService.updateActionStatus(
-                    "UNKNOWN", new UpdateActionStatusRequest("APPROVED"), ACTOR_ID))
+                    "UNKNOWN", new UpdateActionStatusRequest("APPROVED"), SCOPE))
         .isInstanceOf(ActionNotFoundException.class);
   }
 

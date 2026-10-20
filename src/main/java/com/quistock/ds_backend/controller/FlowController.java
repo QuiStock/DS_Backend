@@ -3,6 +3,7 @@ package com.quistock.ds_backend.controller;
 import com.quistock.ds_backend.model.dto.AnalyzeProductRequest;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.service.FlowService;
+import com.quistock.ds_backend.service.UserAccessGuard;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
@@ -15,6 +16,8 @@ import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -37,9 +40,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/flows")
 public class FlowController {
   private final FlowService flowService;
+  private final UserAccessGuard accessGuard;
 
-  public FlowController(FlowService service) {
+  public FlowController(FlowService service, UserAccessGuard accessGuard) {
     this.flowService = service;
+    this.accessGuard = accessGuard;
   }
 
   @PostMapping("/analyze")
@@ -68,9 +73,13 @@ public class FlowController {
       description =
           "Token de GET /csrf; exigido apenas com access_token em cookie. Preserve também"
               + " XSRF-TOKEN.")
-  public ResponseEntity<FlowDTO> analyzeProduct(@Valid @RequestBody AnalyzeProductRequest request) {
+  public ResponseEntity<FlowDTO> analyzeProduct(
+      @Valid @RequestBody AnalyzeProductRequest request, @AuthenticationPrincipal Jwt jwt) {
     return ResponseEntity.status(HttpStatus.CREATED)
-        .body(flowService.analyzeProduct(request.productId()));
+        .body(
+            flowService.analyzeProduct(
+                request.productId(),
+                accessGuard.requireStoreScope(Long.parseLong(jwt.getSubject()), null)));
   }
 
   @GetMapping
@@ -94,7 +103,17 @@ public class FlowController {
   public List<FlowDTO> listFlows(
       @RequestParam(name = "flow_type", required = false) String flowType,
       @RequestParam(name = "product_id", required = false) String productId,
-      @RequestParam(name = "status", required = false) String status) {
-    return flowService.listFlows(flowType, productId, status);
+      @RequestParam(name = "status", required = false) String status,
+      @Parameter(
+              description =
+                  "ID SQL de uma loja ativa permitida. Omitir consolida o escopo do usuário.")
+          @RequestParam(name = "store_id", required = false)
+          Long storeId,
+      @AuthenticationPrincipal Jwt jwt) {
+    return flowService.listFlows(
+        flowType,
+        productId,
+        status,
+        accessGuard.requireStoreScope(Long.parseLong(jwt.getSubject()), storeId));
   }
 }

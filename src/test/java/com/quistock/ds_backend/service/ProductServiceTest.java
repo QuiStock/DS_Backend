@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.quistock.ds_backend.exception.ProductNotFoundException;
 import com.quistock.ds_backend.model.dto.ProductDTO;
 import com.quistock.ds_backend.repository.ProductRepository;
+import com.quistock.ds_backend.repository.StoreScope;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class ProductServiceTest {
+  private static final StoreScope SCOPE = new StoreScope(1001L, null, null);
   private ProductRepository productRepository;
   private ErpSyncService erpSyncService;
   private ProductService productService;
@@ -33,9 +35,10 @@ class ProductServiceTest {
   void shouldListProductsFromThePersistedProjection() {
     ProductDTO product = product("PROD001:FIL001");
     when(productRepository.hasSnapshot()).thenReturn(true);
-    when(productRepository.findAll("Santana Store", "Dairy", true)).thenReturn(List.of(product));
+    when(productRepository.findAll("Santana Store", "Dairy", true, SCOPE))
+        .thenReturn(List.of(product));
 
-    assertThat(productService.listProducts("Santana Store", "Dairy", true))
+    assertThat(productService.listProducts("Santana Store", "Dairy", true, SCOPE))
         .containsExactly(product);
     verify(erpSyncService, never()).syncNow();
   }
@@ -45,9 +48,9 @@ class ProductServiceTest {
     ProductDTO product = product("PROD001:FIL001");
     when(productRepository.hasSnapshot()).thenReturn(false);
     when(erpSyncService.hasCompletedSync()).thenReturn(false);
-    when(productRepository.findAll(null, null, null)).thenReturn(List.of(product));
+    when(productRepository.findAll(null, null, null, SCOPE)).thenReturn(List.of(product));
 
-    assertThat(productService.listProducts(null, null, null)).containsExactly(product);
+    assertThat(productService.listProducts(null, null, null, SCOPE)).containsExactly(product);
 
     verify(erpSyncService).syncNow();
   }
@@ -56,9 +59,9 @@ class ProductServiceTest {
   void shouldSkipSynchronizationWhenItHasAlreadyCompleted() {
     when(productRepository.hasSnapshot()).thenReturn(false);
     when(erpSyncService.hasCompletedSync()).thenReturn(true);
-    when(productRepository.findAll(null, null, null)).thenReturn(List.of());
+    when(productRepository.findAll(null, null, null, SCOPE)).thenReturn(List.of());
 
-    assertThat(productService.listProducts(null, null, null)).isEmpty();
+    assertThat(productService.listProducts(null, null, null, SCOPE)).isEmpty();
 
     verify(erpSyncService, never()).syncNow();
   }
@@ -66,27 +69,27 @@ class ProductServiceTest {
   @Test
   void shouldSkipSynchronizationWhenTheOptionalSyncServiceIsDisabled() {
     ProductService serviceWithoutSync = new ProductService(productRepository, Optional.empty());
-    when(productRepository.findAll(null, null, null)).thenReturn(List.of());
+    when(productRepository.findAll(null, null, null, SCOPE)).thenReturn(List.of());
 
-    assertThat(serviceWithoutSync.listProducts(null, null, null)).isEmpty();
+    assertThat(serviceWithoutSync.listProducts(null, null, null, SCOPE)).isEmpty();
 
-    verify(productRepository).findAll(null, null, null);
+    verify(productRepository).findAll(null, null, null, SCOPE);
   }
 
   @Test
   void shouldFindProductByPublicIdentifier() {
     ProductDTO product = product("PROD001:FIL001");
     when(productRepository.hasSnapshot()).thenReturn(true);
-    when(productRepository.findByPublicId(product.id())).thenReturn(Optional.of(product));
+    when(productRepository.findByPublicId(product.id(), SCOPE)).thenReturn(Optional.of(product));
 
-    assertThat(productService.findProductById(product.id())).isEqualTo(product);
+    assertThat(productService.findProductById(product.id(), SCOPE)).isEqualTo(product);
   }
 
   @Test
   void shouldReportProductNotFoundWhenIdentifierIsMissing() {
     when(productRepository.hasSnapshot()).thenReturn(true);
 
-    assertThatThrownBy(() -> productService.findProductById("UNKNOWN"))
+    assertThatThrownBy(() -> productService.findProductById("UNKNOWN", SCOPE))
         .isInstanceOf(ProductNotFoundException.class);
   }
 

@@ -28,8 +28,8 @@ public class UserManagementService {
     return profileService.profile(actorId);
   }
 
-  public List<UserDTO> listManagers(long actorId) {
-    return managerService.listManagers(actorId);
+  public List<UserDTO> listManagers(long actorId, Long storeId) {
+    return managerService.listManagers(actorId, storeId);
   }
 
   public UserDTO createManager(long actorId, CreateManagerRequest request) {

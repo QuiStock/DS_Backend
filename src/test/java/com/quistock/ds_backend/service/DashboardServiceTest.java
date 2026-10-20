@@ -8,6 +8,7 @@ import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.DashboardSummaryDTO;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.ProductDTO;
+import com.quistock.ds_backend.repository.StoreScope;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class DashboardServiceTest {
+  private static final StoreScope SCOPE = new StoreScope(1001L, null, null);
   private FlowService flowService;
   private ActionService actionService;
   private ProductService productService;
@@ -30,24 +32,24 @@ class DashboardServiceTest {
 
   @Test
   void shouldAggregateLatestProductRisksAndSuggestedActions() {
-    when(flowService.listFlows())
+    when(flowService.listFlows(SCOPE))
         .thenReturn(
             List.of(
-                flow("101", "PROD001:FIL001", "HIGH"),
-                flow("102", "PROD002:FIL002", "MEDIUM"),
+                flow("104", "PROD001:FIL001", "LOW"),
                 flow("103", "PROD003:FIL003", "LOW"),
-                flow("104", "PROD001:FIL001", "LOW")));
-    when(actionService.listActions())
+                flow("102", "PROD002:FIL002", "MEDIUM"),
+                flow("101", "PROD001:FIL001", "HIGH")));
+    when(actionService.listActions(SCOPE))
         .thenReturn(
             List.of(
                 action("501", "101", "PROMOTION", "GENERATED"),
                 action("502", "102", "ORDER", "GENERATED"),
                 action("503", "103", "PROMOTION", "APPROVED"),
                 action("504", "104", "PROMOTION", "GENERATED")));
-    when(productService.listProducts(null, null, null))
+    when(productService.listProducts(null, null, null, SCOPE))
         .thenReturn(List.of(product(10, 5, 10), product(0, 5, null), product(3, 5, 30)));
 
-    DashboardSummaryDTO summary = dashboardService.getSummary();
+    DashboardSummaryDTO summary = dashboardService.getSummary(SCOPE);
 
     assertThat(summary.totalProducts()).isEqualTo(3);
     assertThat(summary.highRiskProducts()).isEqualTo(0);
@@ -64,11 +66,11 @@ class DashboardServiceTest {
 
   @Test
   void shouldReturnZeroSummaryWhenThereIsNoData() {
-    when(flowService.listFlows()).thenReturn(List.of());
-    when(actionService.listActions()).thenReturn(List.of());
-    when(productService.listProducts(null, null, null)).thenReturn(List.of());
+    when(flowService.listFlows(SCOPE)).thenReturn(List.of());
+    when(actionService.listActions(SCOPE)).thenReturn(List.of());
+    when(productService.listProducts(null, null, null, SCOPE)).thenReturn(List.of());
 
-    assertThat(dashboardService.getSummary())
+    assertThat(dashboardService.getSummary(SCOPE))
         .isEqualTo(new DashboardSummaryDTO(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
   }
 

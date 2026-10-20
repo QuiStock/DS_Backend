@@ -4,6 +4,7 @@ import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.DashboardSummaryDTO;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.ProductDTO;
+import com.quistock.ds_backend.repository.StoreScope;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,12 +37,12 @@ public class DashboardService {
     this.shortExpiryDays = expiryDays;
   }
 
-  public DashboardSummaryDTO getSummary() {
-    List<FlowDTO> latestFlows = latestFlowsByProduct();
-    List<ActionListItemDTO> allActions = actionService.listActions();
+  public DashboardSummaryDTO getSummary(StoreScope scope) {
+    List<FlowDTO> latestFlows = latestFlowsByProduct(scope);
+    List<ActionListItemDTO> allActions = actionService.listActions(scope);
     List<ActionListItemDTO> suggestedActions =
         allActions.stream().filter(action -> GENERATED_STATUS.equals(action.status())).toList();
-    List<ProductDTO> products = productService.listProducts(null, null, null);
+    List<ProductDTO> products = productService.listProducts(null, null, null, scope);
 
     return new DashboardSummaryDTO(
         latestFlows.size(),
@@ -57,15 +58,15 @@ public class DashboardService {
         allActions.stream().filter(this::isActiveAction).count());
   }
 
-  private List<FlowDTO> latestFlowsByProduct() {
+  private List<FlowDTO> latestFlowsByProduct(StoreScope scope) {
     Map<String, FlowDTO> latestFlows =
-        flowService.listFlows().stream()
+        flowService.listFlows(scope).stream()
             .filter(flow -> flow.productId() != null)
             .collect(
                 Collectors.toMap(
                     FlowDTO::productId,
                     Function.identity(),
-                    (previous, current) -> current,
+                    (previous, current) -> previous,
                     LinkedHashMap::new));
     return latestFlows.values().stream().toList();
   }

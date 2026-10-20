@@ -19,9 +19,10 @@ class ActionReadRepository {
     this.jdbc = jdbc;
   }
 
-  List<ActionListItemDTO> findAll(String status, String actionType, Long flowId) {
+  List<ActionListItemDTO> findAll(String status, String actionType, Long flowId, StoreScope scope) {
     MapSqlParameterSource parameters =
-        new MapSqlParameterSource()
+        scope
+            .parameters()
             .addValue("status", status)
             .addValue("actionType", actionType)
             .addValue("flowId", flowId);
@@ -41,28 +42,32 @@ class ActionReadRepository {
                sg.promotion_valid_until,
                sd.justification AS decision_justification
         FROM suggestion sg
+        JOIN store s ON s.id = sg.store_id
         JOIN product p ON p.id = sg.product_id
         LEFT JOIN product_analysis pa ON pa.id = sg.product_analysis_id
         LEFT JOIN suggestion_decision sd ON sd.suggestion_id = sg.id
         WHERE (CAST(:status AS text) IS NULL OR sg.status = CAST(:status AS suggestion_status))
           AND (CAST(:actionType AS text) IS NULL OR sg."type" = CAST(:actionType AS suggestion_type))
           AND (CAST(:flowId AS bigint) IS NULL OR sg.product_analysis_id = :flowId)
-        ORDER BY sg.created_at DESC, sg.id DESC
-        """,
+        """
+            + StoreScope.SQL
+            + " ORDER BY sg.created_at DESC, sg.id DESC",
         parameters,
         (resultSet, rowNumber) -> toListItem(resultSet));
   }
 
-  String findTypeById(long id) {
+  String findTypeById(long id, StoreScope scope) {
     List<String> types =
         jdbc.query(
-            "SELECT \"type\"::text FROM suggestion WHERE id = :id",
-            new MapSqlParameterSource("id", id),
+            "SELECT sg.\"type\"::text FROM suggestion sg JOIN store s ON s.id = sg.store_id"
+                + " WHERE sg.id = :id"
+                + StoreScope.SQL,
+            scope.parameters().addValue("id", id),
             (resultSet, rowNumber) -> resultSet.getString(1));
     return types.isEmpty() ? null : types.get(0);
   }
 
-  ActionDTO findActionById(long suggestionId) {
+  ActionDTO findActionById(long suggestionId, StoreScope scope) {
     List<ActionDTO> actions =
         jdbc.query(
             """
@@ -71,9 +76,10 @@ class ActionReadRepository {
                      WHERE sl.suggestion_id = sg.id AND sl.event = 'GENERATED'
                      ORDER BY sl.occurred_at, sl.id LIMIT 1), '') AS justification,
                    sg.promotion_valid_from, sg.promotion_valid_until
-            FROM suggestion sg WHERE sg.id = :id
-            """,
-            new MapSqlParameterSource("id", suggestionId),
+            FROM suggestion sg JOIN store s ON s.id = sg.store_id WHERE sg.id = :id
+            """
+                + StoreScope.SQL,
+            scope.parameters().addValue("id", suggestionId),
             (resultSet, rowNumber) -> toAction(resultSet));
     if (actions.isEmpty()) {
       throw new ActionNotFoundException(Long.toString(suggestionId));
@@ -81,11 +87,13 @@ class ActionReadRepository {
     return actions.get(0);
   }
 
-  Long findSuggestionIdByFlow(long flowId) {
+  Long findSuggestionIdByFlow(long flowId, StoreScope scope) {
     List<Long> ids =
         jdbc.query(
-            "SELECT id FROM suggestion WHERE product_analysis_id = :flowId",
-            new MapSqlParameterSource("flowId", flowId),
+            "SELECT sg.id FROM suggestion sg JOIN store s ON s.id = sg.store_id"
+                + " WHERE sg.product_analysis_id = :flowId"
+                + StoreScope.SQL,
+            scope.parameters().addValue("flowId", flowId),
             (resultSet, rowNumber) -> resultSet.getLong("id"));
     return ids.isEmpty() ? null : ids.get(0);
   }

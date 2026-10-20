@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -53,8 +54,19 @@ public class ManagerController {
           "ADMIN consulta todos; GERENTE_REGIONAL consulta apenas gerentes de sua região."
               + " Inclui contas inativas pela última filial vinculada.")
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
-  public List<UserDTO> listManagers(@AuthenticationPrincipal Jwt jwt) {
-    return service.listManagers(actorId(jwt));
+  @ApiResponse(
+      responseCode = "400",
+      description = "store_id deve identificar uma loja por um ID SQL positivo.",
+      content =
+          @Content(
+              schema = @Schema(implementation = com.quistock.ds_backend.model.dto.ErrorDTO.class)))
+  public List<UserDTO> listManagers(
+      @AuthenticationPrincipal Jwt jwt,
+      @Parameter(
+              description = "ID SQL de uma loja ativa permitida; omitir lista o escopo do usuário.")
+          @RequestParam(name = "store_id", required = false)
+          Long storeId) {
+    return service.listManagers(actorId(jwt), storeId);
   }
 
   @PostMapping

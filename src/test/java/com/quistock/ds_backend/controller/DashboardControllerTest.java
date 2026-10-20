@@ -10,18 +10,28 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.quistock.ds_backend.exception.ErpIntegrationException;
 import com.quistock.ds_backend.handler.ApiExceptionHandler;
 import com.quistock.ds_backend.model.dto.DashboardSummaryDTO;
+import com.quistock.ds_backend.repository.StoreScope;
 import com.quistock.ds_backend.service.DashboardService;
+import com.quistock.ds_backend.service.UserAccessGuard;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.MethodParameter;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.bind.support.WebDataBinderFactory;
+import org.springframework.web.context.request.NativeWebRequest;
+import org.springframework.web.method.support.HandlerMethodArgumentResolver;
+import org.springframework.web.method.support.ModelAndViewContainer;
 
 class DashboardControllerTest {
+  private static final StoreScope SCOPE = new StoreScope(1001L, null, null);
 
   @Test
   void shouldReturnDashboardSummaryOnPublicRoute() throws Exception {
     DashboardService dashboardService = mock(DashboardService.class);
-    when(dashboardService.getSummary())
+    when(dashboardService.getSummary(SCOPE))
         .thenReturn(new DashboardSummaryDTO(5, 1, 2, 2, 3, 2, 1, 4, 2, 3, 5));
 
     mockMvc(dashboardService)
@@ -44,7 +54,7 @@ class DashboardControllerTest {
   @Test
   void shouldReturn503WhenErpIsUnavailable() throws Exception {
     DashboardService dashboardService = mock(DashboardService.class);
-    when(dashboardService.getSummary())
+    when(dashboardService.getSummary(SCOPE))
         .thenThrow(
             new ErpIntegrationException(
                 "Could not connect to the external ERP API.", new RuntimeException()));
@@ -56,7 +66,29 @@ class DashboardControllerTest {
   }
 
   private MockMvc mockMvc(DashboardService dashboardService) {
-    return MockMvcBuilders.standaloneSetup(new DashboardController(dashboardService))
+    UserAccessGuard accessGuard = mock(UserAccessGuard.class);
+    when(accessGuard.requireStoreScope(1001L, null)).thenReturn(SCOPE);
+    return MockMvcBuilders.standaloneSetup(new DashboardController(dashboardService, accessGuard))
+        .setCustomArgumentResolvers(
+            new HandlerMethodArgumentResolver() {
+              @Override
+              public boolean supportsParameter(MethodParameter parameter) {
+                return parameter.hasParameterAnnotation(AuthenticationPrincipal.class)
+                    && Jwt.class.isAssignableFrom(parameter.getParameterType());
+              }
+
+              @Override
+              public Object resolveArgument(
+                  MethodParameter parameter,
+                  ModelAndViewContainer container,
+                  NativeWebRequest request,
+                  WebDataBinderFactory factory) {
+                return Jwt.withTokenValue("test-token")
+                    .header("alg", "RS256")
+                    .subject("1001")
+                    .build();
+              }
+            })
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
   }
