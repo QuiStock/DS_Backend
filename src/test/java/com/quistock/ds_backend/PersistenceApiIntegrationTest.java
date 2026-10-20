@@ -271,10 +271,9 @@ class PersistenceApiIntegrationTest {
   }
 
   private void seedAuthenticatedUser() {
-    jdbc.update("INSERT INTO role (id, code, name) VALUES (?, 'TEST', 'Test')", TEST_USER_ID);
     jdbc.update(
-        "INSERT INTO user_account (id, role_id, name, email, password_hash) VALUES (?, ?, ?, ?, ?)",
-        TEST_USER_ID,
+        "INSERT INTO user_account (id, role_id, name, email, password_hash) VALUES "
+            + "(?, (SELECT id FROM role WHERE code = 'ADMIN'), ?, ?, ?)",
         TEST_USER_ID,
         "Mobile User",
         "mobile@test.example",
@@ -318,7 +317,6 @@ class PersistenceApiIntegrationTest {
         .isEqualTo("manager@test.example");
     getAs("/managers", 403, managerToken);
     getAs("/regions", 200, managerToken);
-    getAs("/regions", 403, validToken());
     assertThat(getAs("/regions", 200, regionalToken).size()).isEqualTo(1);
     JsonNode regionalBranches = getAs("/branches", 200, regionalToken);
     assertThat(regionalBranches.size()).isEqualTo(1);
@@ -336,6 +334,7 @@ class PersistenceApiIntegrationTest {
             201,
             managerToken);
     String employeeId = employee.path("id").asString();
+    getAs("/regions", 403, tokenFor(Long.parseLong(employeeId), "employee@test.example"));
     assertThat(getAs("/team-members/" + employeeId, 200, managerToken).path("id").asString())
         .isEqualTo(employeeId);
     assertThat(employee.path("role").asString()).isEqualTo("FUNCIONARIO");

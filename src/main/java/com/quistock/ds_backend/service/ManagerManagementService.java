@@ -44,11 +44,9 @@ class ManagerManagementService {
   }
 
   @Transactional(readOnly = true)
-  public List<UserDTO> listManagers(long actorId) {
-    Long regionId = accessGuard.requireManagerManagement(actorId);
-    return regionId == null
-        ? readRepository.findManagers()
-        : readRepository.findManagersInRegion(regionId);
+  public List<UserDTO> listManagers(long actorId, Long storeId) {
+    accessGuard.requireManagerManagement(actorId);
+    return readRepository.findManagers(accessGuard.requireStoreScope(actorId, storeId));
   }
 
   @Transactional

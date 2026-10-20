@@ -1,6 +1,7 @@
 package com.quistock.ds_backend.repository;
 
 import com.quistock.ds_backend.exception.ActionNotFoundException;
+import com.quistock.ds_backend.exception.FlowNotFoundException;
 import com.quistock.ds_backend.model.dto.ActionDTO;
 import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.ActionStatusResponse;
@@ -43,21 +44,22 @@ public class ActionRepository {
       String justification,
       LocalDate promotionValidFrom,
       LocalDate promotionValidUntil,
-      long actorId) {
+      StoreScope scope) {
     Long flowId = parseId(flow.id());
     if (flowId == null) {
       throw new IllegalArgumentException("The flow ID must be a persisted analysis ID.");
     }
 
     MapSqlParameterSource parameters =
-        new MapSqlParameterSource()
+        scope
+            .parameters()
             .addValue("flowId", flowId)
             .addValue("actionType", actionType)
             .addValue("origin", "EMPLOYEE")
             .addValue(STATUS_PARAMETER, GENERATED)
             .addValue("promotionValidFrom", promotionValidFrom)
             .addValue("promotionValidUntil", promotionValidUntil)
-            .addValue("actorId", actorId);
+            .addValue("actorId", scope.actorId());
     List<Long> insertedIds =
         jdbc.query(
             """
@@ -75,19 +77,23 @@ public class ActionRepository {
                      THEN ps.sale_price ELSE NULL END,
                    :actorId, TRUE
             FROM product_analysis pa
+            JOIN store s ON s.id = pa.store_id
             JOIN product_store ps
               ON ps.product_id = pa.product_id AND ps.store_id = pa.store_id
             WHERE pa.id = :flowId
-            ON CONFLICT (product_analysis_id) WHERE product_analysis_id IS NOT NULL DO NOTHING
-            RETURNING id
-            """,
+            """
+                + StoreScope.SQL
+                + " ON CONFLICT (product_analysis_id) WHERE product_analysis_id IS NOT NULL DO NOTHING"
+                + " RETURNING id",
             parameters,
             (resultSet, rowNumber) -> resultSet.getLong("id"));
 
     Long suggestionId =
-        insertedIds.isEmpty() ? readRepository.findSuggestionIdByFlow(flowId) : insertedIds.get(0);
+        insertedIds.isEmpty()
+            ? readRepository.findSuggestionIdByFlow(flowId, scope)
+            : insertedIds.get(0);
     if (suggestionId == null) {
-      throw new IllegalArgumentException("The analyzed flow has no persisted product snapshot.");
+      throw new FlowNotFoundException(flow.id());
     }
     if (!insertedIds.isEmpty()) {
       auditRepository.logGenerated(
@@ -95,30 +101,31 @@ public class ActionRepository {
               suggestionId,
               actionType,
               flowId,
-              actorId,
+              scope.actorId(),
               promotionValidFrom,
               promotionValidUntil,
               justification));
     }
-    return readRepository.findActionById(suggestionId);
+    return readRepository.findActionById(suggestionId, scope);
   }
 
-  public List<ActionListItemDTO> findAll(String status, String actionType, String flowId) {
+  public List<ActionListItemDTO> findAll(
+      String status, String actionType, String flowId, StoreScope scope) {
     Long analysisId = flowId == null ? null : parseId(flowId);
     if (flowId != null && analysisId == null) {
       return List.of();
     }
-    return readRepository.findAll(status, actionType, analysisId);
+    return readRepository.findAll(status, actionType, analysisId, scope);
   }
 
-  public String findTypeById(String actionId) {
+  public String findTypeById(String actionId, StoreScope scope) {
     Long id = parseId(actionId);
-    return id == null ? null : readRepository.findTypeById(id);
+    return id == null ? null : readRepository.findTypeById(id, scope);
   }
 
   @Transactional
   public ActionStatusResponse updateStatus(
-      String actionId, UpdateActionStatusRequest request, long actorId) {
+      String actionId, UpdateActionStatusRequest request, StoreScope scope) {
     Long id = parseId(actionId);
     if (id == null) {
       throw new ActionNotFoundException(actionId);
@@ -127,11 +134,13 @@ public class ActionRepository {
     List<StoredSuggestion> rows =
         jdbc.query(
             """
-            SELECT id, status::text AS status, "type"::text AS type,
-                   promotion_valid_from, promotion_valid_until
-            FROM suggestion WHERE id = :id FOR UPDATE
-            """,
-            new MapSqlParameterSource("id", id),
+            SELECT sg.id, sg.status::text AS status, sg."type"::text AS type,
+                   sg.promotion_valid_from, sg.promotion_valid_until
+            FROM suggestion sg JOIN store s ON s.id = sg.store_id WHERE sg.id = :id
+            """
+                + StoreScope.SQL
+                + " FOR UPDATE OF sg",
+            scope.parameters().addValue("id", id),
             (resultSet, rowNumber) -> toStoredSuggestion(resultSet));
     if (rows.isEmpty()) {
       throw new ActionNotFoundException(actionId);
@@ -147,13 +156,13 @@ public class ActionRepository {
             ? current.validUntil()
             : request.finalPromotionValidUntil();
     updateStatusRow(id, request.status(), validFrom, validUntil);
-    decisionRepository.updateTriageIfNeeded(id, request.status(), actorId);
+    decisionRepository.updateTriageIfNeeded(id, request.status(), scope.actorId());
     decisionRepository.updateDecisionIfNeeded(
-        id, request.status(), request.justification(), validFrom, validUntil, actorId);
+        id, request.status(), request.justification(), validFrom, validUntil, scope.actorId());
     auditRepository.logStatusChanged(
         new ActionAuditRepository.StatusChangedLog(
             id,
-            actorId,
+            scope.actorId(),
             current.status(),
             request.status(),
             validFrom,

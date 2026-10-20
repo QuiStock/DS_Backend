@@ -13,21 +13,31 @@ import com.quistock.ds_backend.exception.InvalidRequestException;
 import com.quistock.ds_backend.exception.ProductNotFoundException;
 import com.quistock.ds_backend.handler.ApiExceptionHandler;
 import com.quistock.ds_backend.model.dto.FlowDTO;
+import com.quistock.ds_backend.repository.StoreScope;
 import com.quistock.ds_backend.service.FlowService;
+import com.quistock.ds_backend.service.UserAccessGuard;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.MethodParameter;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.bind.support.WebDataBinderFactory;
+import org.springframework.web.context.request.NativeWebRequest;
+import org.springframework.web.method.support.HandlerMethodArgumentResolver;
+import org.springframework.web.method.support.ModelAndViewContainer;
 
 class FlowControllerTest {
+  private static final StoreScope SCOPE = new StoreScope(1001L, null, null);
 
   @Test
   void shouldAnalyzeProductOnPublicRoute() throws Exception {
     FlowService flowService = mock(FlowService.class);
-    when(flowService.analyzeProduct("PROD001:FIL001")).thenReturn(flow());
+    when(flowService.analyzeProduct("PROD001:FIL001", SCOPE)).thenReturn(flow());
 
     mockMvc(flowService)
         .perform(
@@ -72,7 +82,8 @@ class FlowControllerTest {
   @Test
   void shouldListFlowsUsingContractFilters() throws Exception {
     FlowService flowService = mock(FlowService.class);
-    when(flowService.listFlows("LOW", "PROD001:FIL001", "ANALYZED")).thenReturn(List.of(flow()));
+    when(flowService.listFlows("LOW", "PROD001:FIL001", "ANALYZED", SCOPE))
+        .thenReturn(List.of(flow()));
 
     mockMvc(flowService)
         .perform(
@@ -91,7 +102,8 @@ class FlowControllerTest {
   @Test
   void shouldReturn400ForUnsupportedFlowTypeFilter() throws Exception {
     FlowService flowService = mock(FlowService.class);
-    when(flowService.listFlows("URGENT", null, null)).thenThrow(new InvalidRequestException());
+    when(flowService.listFlows("URGENT", null, null, SCOPE))
+        .thenThrow(new InvalidRequestException());
 
     mockMvc(flowService)
         .perform(get("/flows").queryParam("flow_type", "URGENT"))
@@ -103,7 +115,8 @@ class FlowControllerTest {
   @Test
   void shouldReturn400ForUnsupportedFlowStatusFilter() throws Exception {
     FlowService flowService = mock(FlowService.class);
-    when(flowService.listFlows(null, null, "PENDING")).thenThrow(new InvalidRequestException());
+    when(flowService.listFlows(null, null, "PENDING", SCOPE))
+        .thenThrow(new InvalidRequestException());
 
     mockMvc(flowService)
         .perform(get("/flows").queryParam("status", "PENDING"))
@@ -115,7 +128,8 @@ class FlowControllerTest {
   @Test
   void shouldReturn404WhenProductIsNotFound() throws Exception {
     FlowService flowService = mock(FlowService.class);
-    when(flowService.analyzeProduct("UNKNOWN")).thenThrow(new ProductNotFoundException("UNKNOWN"));
+    when(flowService.analyzeProduct("UNKNOWN", SCOPE))
+        .thenThrow(new ProductNotFoundException("UNKNOWN"));
 
     mockMvc(flowService)
         .perform(
@@ -129,7 +143,7 @@ class FlowControllerTest {
   @Test
   void shouldReturn503WhenErpIsUnavailable() throws Exception {
     FlowService flowService = mock(FlowService.class);
-    when(flowService.analyzeProduct("PROD001:FIL001"))
+    when(flowService.analyzeProduct("PROD001:FIL001", SCOPE))
         .thenThrow(
             new ErpIntegrationException(
                 "Could not connect to the external ERP API.", new RuntimeException()));
@@ -144,7 +158,29 @@ class FlowControllerTest {
   }
 
   private MockMvc mockMvc(FlowService flowService) {
-    return MockMvcBuilders.standaloneSetup(new FlowController(flowService))
+    UserAccessGuard accessGuard = mock(UserAccessGuard.class);
+    when(accessGuard.requireStoreScope(1001L, null)).thenReturn(SCOPE);
+    return MockMvcBuilders.standaloneSetup(new FlowController(flowService, accessGuard))
+        .setCustomArgumentResolvers(
+            new HandlerMethodArgumentResolver() {
+              @Override
+              public boolean supportsParameter(MethodParameter parameter) {
+                return parameter.hasParameterAnnotation(AuthenticationPrincipal.class)
+                    && Jwt.class.isAssignableFrom(parameter.getParameterType());
+              }
+
+              @Override
+              public Object resolveArgument(
+                  MethodParameter parameter,
+                  ModelAndViewContainer container,
+                  NativeWebRequest request,
+                  WebDataBinderFactory factory) {
+                return Jwt.withTokenValue("test-token")
+                    .header("alg", "RS256")
+                    .subject("1001")
+                    .build();
+              }
+            })
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
   }

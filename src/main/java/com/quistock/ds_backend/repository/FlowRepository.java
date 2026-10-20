@@ -43,7 +43,7 @@ public class FlowRepository {
     this.objectMapper = objectMapper;
   }
 
-  public long insertAnalysis(AnalysisSnapshot analysis) {
+  public long insertAnalysis(AnalysisSnapshot analysis, StoreScope scope) {
     ProductKey key = parseProductId(analysis.publicProductId());
     if (key == null) {
       return -1;
@@ -61,7 +61,8 @@ public class FlowRepository {
     Map<String, Object> context = Map.of("reason", analysis.reason(), "classifier", "RULE_ENGINE");
 
     MapSqlParameterSource parameters =
-        new MapSqlParameterSource()
+        scope
+            .parameters()
             .addValue("productErpId", key.productErpId())
             .addValue("storeErpId", key.storeErpId())
             .addValue("flowType", analysis.flowType())
@@ -85,21 +86,22 @@ public class FlowRepository {
               AND s.erp_id = :storeErpId
               AND ps.active = TRUE
               AND p.active = TRUE
-              AND s.status = 'ACTIVE'
-            RETURNING id
-            """,
+            """
+                + StoreScope.SQL
+                + " RETURNING id",
             parameters,
             (resultSet, rowNumber) -> resultSet.getLong("id"));
     return ids.isEmpty() ? -1 : ids.get(0);
   }
 
-  public List<FlowDTO> findAll(String flowType, String productId, String status) {
+  public List<FlowDTO> findAll(String flowType, String productId, String status, StoreScope scope) {
     ProductKey key = productId == null ? null : parseProductId(productId);
     if (productId != null && key == null) {
       return List.of();
     }
     MapSqlParameterSource parameters =
-        new MapSqlParameterSource()
+        scope
+            .parameters()
             .addValue("flowType", flowType)
             .addValue("productErpId", key == null ? null : key.productErpId())
             .addValue("storeErpId", key == null ? null : key.storeErpId());
@@ -108,22 +110,24 @@ public class FlowRepository {
         FLOW_SELECT
             + " WHERE (CAST(:flowType AS text) IS NULL OR ft.code = CAST(:flowType AS flow_type))"
             + " AND (CAST(:productErpId AS text) IS NULL OR (p.erp_id = :productErpId AND s.erp_id"
-            + " = :storeErpId)) ORDER BY pa.created_at DESC, pa.id DESC";
+            + " = :storeErpId))"
+            + StoreScope.SQL
+            + " ORDER BY pa.created_at DESC, pa.id DESC";
     if (status != null && !"ANALYZED".equals(status)) {
       return List.of();
     }
     return jdbc.query(sql, parameters, (resultSet, rowNumber) -> toFlow(resultSet));
   }
 
-  public Optional<FlowDTO> findById(String id) {
+  public Optional<FlowDTO> findById(String id, StoreScope scope) {
     Long analysisId = parseId(id);
     if (analysisId == null) {
       return Optional.empty();
     }
     List<FlowDTO> flows =
         jdbc.query(
-            FLOW_SELECT + " WHERE pa.id = :id",
-            new MapSqlParameterSource("id", analysisId),
+            FLOW_SELECT + " WHERE pa.id = :id" + StoreScope.SQL,
+            scope.parameters().addValue("id", analysisId),
             (resultSet, rowNumber) -> toFlow(resultSet));
     return flows.stream().findFirst();
   }

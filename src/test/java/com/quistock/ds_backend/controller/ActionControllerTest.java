@@ -19,7 +19,9 @@ import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.ActionStatusResponse;
 import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
 import com.quistock.ds_backend.model.dto.UpdateActionStatusRequest;
+import com.quistock.ds_backend.repository.StoreScope;
 import com.quistock.ds_backend.service.ActionService;
+import com.quistock.ds_backend.service.UserAccessGuard;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.MethodParameter;
@@ -35,6 +37,7 @@ import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.method.support.ModelAndViewContainer;
 
 class ActionControllerTest {
+  private static final StoreScope SCOPE = new StoreScope(1001L, null, null);
   private static final long ACTOR_ID = 1001L;
   private static final String JWT_REQUEST_ATTRIBUTE = "authenticatedJwt";
 
@@ -44,7 +47,7 @@ class ActionControllerTest {
     ActionDTO action =
         new ActionDTO(
             "501", "PROMOTION", "GENERATED", "Product has expiration or excess stock risk.");
-    when(actionService.generateActions("101", null, null, ACTOR_ID))
+    when(actionService.generateActions("101", null, null, SCOPE))
         .thenReturn(new GenerateActionsResponse("101", List.of(action)));
 
     mockMvc(actionService)
@@ -75,7 +78,7 @@ class ActionControllerTest {
   @Test
   void shouldReturn404WhenFlowIsNotFound() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.generateActions("UNKNOWN", null, null, ACTOR_ID))
+    when(actionService.generateActions("UNKNOWN", null, null, SCOPE))
         .thenThrow(new FlowNotFoundException("UNKNOWN"));
 
     mockMvc(actionService)
@@ -99,7 +102,8 @@ class ActionControllerTest {
             "PROMOTION",
             "GENERATED",
             "Product has expiration or excess stock risk.");
-    when(actionService.listActions("GENERATED", "PROMOTION", "101")).thenReturn(List.of(action));
+    when(actionService.listActions("GENERATED", "PROMOTION", "101", SCOPE))
+        .thenReturn(List.of(action));
 
     mockMvc(actionService)
         .perform(
@@ -119,7 +123,7 @@ class ActionControllerTest {
   @Test
   void shouldReturn400ForUnsupportedActionTypeFilter() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.listActions(null, "DISCOUNT", null))
+    when(actionService.listActions(null, "DISCOUNT", null, SCOPE))
         .thenThrow(new InvalidRequestException());
 
     mockMvc(actionService)
@@ -132,7 +136,8 @@ class ActionControllerTest {
   @Test
   void shouldReturn400ForUnsupportedActionStatusFilter() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.listActions("ACTIVE", null, null)).thenThrow(new InvalidRequestException());
+    when(actionService.listActions("ACTIVE", null, null, SCOPE))
+        .thenThrow(new InvalidRequestException());
 
     mockMvc(actionService)
         .perform(get("/actions").queryParam("status", "ACTIVE"))
@@ -144,8 +149,7 @@ class ActionControllerTest {
   @Test
   void shouldUpdateActionStatusUsingAuthenticatedUser() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.updateActionStatus(
-            "501", new UpdateActionStatusRequest("APPROVED"), ACTOR_ID))
+    when(actionService.updateActionStatus("501", new UpdateActionStatusRequest("APPROVED"), SCOPE))
         .thenReturn(new ActionStatusResponse("501", "APPROVED"));
 
     mockMvc(actionService)
@@ -164,7 +168,7 @@ class ActionControllerTest {
   void shouldReturn404WhenActionIsNotFound() throws Exception {
     ActionService actionService = mock(ActionService.class);
     when(actionService.updateActionStatus(
-            "UNKNOWN", new UpdateActionStatusRequest("APPROVED"), ACTOR_ID))
+            "UNKNOWN", new UpdateActionStatusRequest("APPROVED"), SCOPE))
         .thenThrow(new ActionNotFoundException("UNKNOWN"));
 
     mockMvc(actionService)
@@ -180,8 +184,7 @@ class ActionControllerTest {
   @Test
   void shouldReturn400ForUnsupportedActionStatus() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.updateActionStatus(
-            "501", new UpdateActionStatusRequest("INVALID"), ACTOR_ID))
+    when(actionService.updateActionStatus("501", new UpdateActionStatusRequest("INVALID"), SCOPE))
         .thenThrow(new InvalidActionStatusException("INVALID"));
 
     mockMvc(actionService)
@@ -210,7 +213,9 @@ class ActionControllerTest {
   }
 
   private MockMvc mockMvc(ActionService actionService) {
-    return MockMvcBuilders.standaloneSetup(new ActionController(actionService))
+    UserAccessGuard accessGuard = mock(UserAccessGuard.class);
+    when(accessGuard.requireStoreScope(1001L, null)).thenReturn(SCOPE);
+    return MockMvcBuilders.standaloneSetup(new ActionController(actionService, accessGuard))
         .setCustomArgumentResolvers(
             new HandlerMethodArgumentResolver() {
               @Override
@@ -225,8 +230,14 @@ class ActionControllerTest {
                   ModelAndViewContainer mavContainer,
                   NativeWebRequest webRequest,
                   WebDataBinderFactory binderFactory) {
-                return webRequest.getAttribute(
-                    JWT_REQUEST_ATTRIBUTE, NativeWebRequest.SCOPE_REQUEST);
+                Object token =
+                    webRequest.getAttribute(JWT_REQUEST_ATTRIBUTE, NativeWebRequest.SCOPE_REQUEST);
+                return token == null
+                    ? Jwt.withTokenValue("test-token")
+                        .header("alg", "RS256")
+                        .subject("1001")
+                        .build()
+                    : token;
               }
             })
         .setControllerAdvice(new ApiExceptionHandler())

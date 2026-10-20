@@ -18,11 +18,6 @@ public class BranchService {
 
   @Transactional(readOnly = true)
   public List<BranchDTO> listBranches(long actorId) {
-    var actor = accessGuard.requireRoleOrActive(actorId);
-    Long regionId =
-        UserManagementRules.REGIONAL_MANAGER.equals(actor.role())
-            ? accessGuard.requireManagerManagement(actorId)
-            : null;
-    return branchRepository.findActiveBranches(regionId);
+    return branchRepository.findActiveBranches(accessGuard.requireStoreScope(actorId, null));
   }
 }

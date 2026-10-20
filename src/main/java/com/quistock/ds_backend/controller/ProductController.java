@@ -2,6 +2,7 @@ package com.quistock.ds_backend.controller;
 
 import com.quistock.ds_backend.model.dto.ProductDTO;
 import com.quistock.ds_backend.service.ProductService;
+import com.quistock.ds_backend.service.UserAccessGuard;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -10,6 +11,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -32,9 +35,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProductController {
 
   private final ProductService productService;
+  private final UserAccessGuard accessGuard;
 
-  public ProductController(ProductService service) {
+  public ProductController(ProductService service, UserAccessGuard accessGuard) {
     this.productService = service;
+    this.accessGuard = accessGuard;
   }
 
   @GetMapping
@@ -66,8 +71,18 @@ public class ProductController {
   public List<ProductDTO> listProducts(
       @RequestParam(name = "branch", required = false) String branch,
       @RequestParam(name = "category", required = false) String category,
-      @RequestParam(name = "status", required = false) Boolean status) {
-    return productService.listProducts(branch, category, status);
+      @RequestParam(name = "status", required = false) Boolean status,
+      @Parameter(
+              description =
+                  "ID SQL de uma loja ativa permitida. Omitir consolida o escopo do usuário.")
+          @RequestParam(name = "store_id", required = false)
+          Long storeId,
+      @AuthenticationPrincipal Jwt jwt) {
+    return productService.listProducts(
+        branch,
+        category,
+        status,
+        accessGuard.requireStoreScope(Long.parseLong(jwt.getSubject()), storeId));
   }
 
   @GetMapping("/{id}")
@@ -90,7 +105,9 @@ public class ProductController {
       content =
           @Content(
               schema = @Schema(implementation = com.quistock.ds_backend.model.dto.ErrorDTO.class)))
-  public ProductDTO findProductById(@PathVariable("id") String id) {
-    return productService.findProductById(id);
+  public ProductDTO findProductById(
+      @PathVariable("id") String id, @AuthenticationPrincipal Jwt jwt) {
+    return productService.findProductById(
+        id, accessGuard.requireStoreScope(Long.parseLong(jwt.getSubject()), null));
   }
 }

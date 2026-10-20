@@ -11,21 +11,31 @@ import com.quistock.ds_backend.exception.ErpIntegrationException;
 import com.quistock.ds_backend.exception.ProductNotFoundException;
 import com.quistock.ds_backend.handler.ApiExceptionHandler;
 import com.quistock.ds_backend.model.dto.ProductDTO;
+import com.quistock.ds_backend.repository.StoreScope;
 import com.quistock.ds_backend.service.ProductService;
+import com.quistock.ds_backend.service.UserAccessGuard;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.MethodParameter;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.bind.support.WebDataBinderFactory;
+import org.springframework.web.context.request.NativeWebRequest;
+import org.springframework.web.method.support.HandlerMethodArgumentResolver;
+import org.springframework.web.method.support.ModelAndViewContainer;
 
 class ProductControllerTest {
+  private static final StoreScope SCOPE = new StoreScope(1001L, null, null);
 
   @Test
   void shouldListProductsOnPublicRoute() throws Exception {
     ProductService productService = mock(ProductService.class);
-    when(productService.listProducts(null, null, null)).thenReturn(List.of(product()));
+    when(productService.listProducts(null, null, null, SCOPE)).thenReturn(List.of(product()));
 
     MockMvc mockMvc = createMockMvc(productService);
 
@@ -41,7 +51,7 @@ class ProductControllerTest {
   @Test
   void shouldBindAllProductFiltersFromTheQueryString() throws Exception {
     ProductService productService = mock(ProductService.class);
-    when(productService.listProducts("Santana Store", "Dairy", true))
+    when(productService.listProducts("Santana Store", "Dairy", true, SCOPE))
         .thenReturn(List.of(product()));
 
     createMockMvc(productService)
@@ -57,7 +67,7 @@ class ProductControllerTest {
   @Test
   void shouldReturn503WhenErpIsUnavailable() throws Exception {
     ProductService productService = mock(ProductService.class);
-    when(productService.listProducts(null, null, null))
+    when(productService.listProducts(null, null, null, SCOPE))
         .thenThrow(
             new ErpIntegrationException(
                 "Could not connect to the external ERP API.", new RuntimeException()));
@@ -74,7 +84,7 @@ class ProductControllerTest {
   @Test
   void shouldFindProductByIdOnPublicRoute() throws Exception {
     ProductService productService = mock(ProductService.class);
-    when(productService.findProductById("PROD001:FIL001")).thenReturn(product());
+    when(productService.findProductById("PROD001:FIL001", SCOPE)).thenReturn(product());
 
     MockMvc mockMvc = createMockMvc(productService);
 
@@ -89,7 +99,7 @@ class ProductControllerTest {
   @Test
   void shouldReturn404WhenProductIsNotFound() throws Exception {
     ProductService productService = mock(ProductService.class);
-    when(productService.findProductById("UNKNOWN"))
+    when(productService.findProductById("UNKNOWN", SCOPE))
         .thenThrow(new ProductNotFoundException("UNKNOWN"));
 
     MockMvc mockMvc = createMockMvc(productService);
@@ -104,7 +114,7 @@ class ProductControllerTest {
   @Test
   void shouldReturn503WhenErpIsUnavailableForProductLookup() throws Exception {
     ProductService productService = mock(ProductService.class);
-    when(productService.findProductById("PROD001:FIL001"))
+    when(productService.findProductById("PROD001:FIL001", SCOPE))
         .thenThrow(
             new ErpIntegrationException(
                 "Could not connect to the external ERP API.", new RuntimeException()));
@@ -127,7 +137,29 @@ class ProductControllerTest {
   }
 
   private MockMvc createMockMvc(ProductService productService) {
-    return MockMvcBuilders.standaloneSetup(new ProductController(productService))
+    UserAccessGuard accessGuard = mock(UserAccessGuard.class);
+    when(accessGuard.requireStoreScope(1001L, null)).thenReturn(SCOPE);
+    return MockMvcBuilders.standaloneSetup(new ProductController(productService, accessGuard))
+        .setCustomArgumentResolvers(
+            new HandlerMethodArgumentResolver() {
+              @Override
+              public boolean supportsParameter(MethodParameter parameter) {
+                return parameter.hasParameterAnnotation(AuthenticationPrincipal.class)
+                    && Jwt.class.isAssignableFrom(parameter.getParameterType());
+              }
+
+              @Override
+              public Object resolveArgument(
+                  MethodParameter parameter,
+                  ModelAndViewContainer container,
+                  NativeWebRequest request,
+                  WebDataBinderFactory factory) {
+                return Jwt.withTokenValue("test-token")
+                    .header("alg", "RS256")
+                    .subject("1001")
+                    .build();
+              }
+            })
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
   }

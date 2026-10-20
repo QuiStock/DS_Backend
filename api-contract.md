@@ -1,7 +1,7 @@
 # QuiStock API Contract
 
-Version: 2.0.0
-Last updated: 2026-10-12
+Version: 2.1.0
+Last updated: 2026-10-20
 
 ## Base URL
 
@@ -51,13 +51,66 @@ email. The expected audience is `quistock-api` by default. Configure `AUTH_JWT_I
 
 Missing, invalid, or expired tokens return `401 Unauthorized`. Actor IDs written for suggestion
 creation, triage, decisions, and logs come from the authenticated `sub`, never from a request
-body. Core looks up the active account and role in PostgreSQL for user-management authorization;
+body. Core looks up the active account and role in PostgreSQL for store and user-management authorization;
 it does not trust a role claim from the JWT.
 
 The Auth `access_token` cookie must also be in scope for the Core request: deploy Auth and Core
 behind the same host/gateway or configure a shared parent cookie domain and `Path=/` in Auth.
 CORS alone cannot make a cookie set for a different host available to Core. The existing Bearer
 header remains supported for clients that send it explicitly.
+
+### Store filters and authorization
+
+The following GET routes accept an optional `store_id` query parameter: `/products`,
+`/flows`, `/actions`, `/dashboard/summary`, and `/managers`.
+
+`store_id` identifies **one active store** by its positive numeric SQL `store.id`, returned
+as `store_id` by `/branches`. It is not the ERP branch code (`/branches[].id`).
+Without the filter, Core consolidates only the caller's permitted active stores:
+
+| SQL role | Store scope |
+| --- | --- |
+| `ADMIN` | All active stores. |
+| `GERENTE_REGIONAL` | Active stores in their assigned active region. |
+| `GERENTE` | Their single actively assigned store. |
+| `FUNCIONARIO` | Their single actively assigned store. |
+
+The SQL account must be active. Missing/inactive required assignments or unsupported roles
+return `403`. An explicit nonexistent, inactive, or unauthorized `store_id` returns `403`;
+nonpositive or nonnumeric values return `400`. No matching records in an allowed store
+return an empty list, or zero dashboard metrics. No query falls back to global data.
+
+Existing endpoint role restrictions still apply: `/managers` is restricted to `ADMIN` and
+`GERENTE_REGIONAL`; `/team-members` remains restricted to `GERENTE` and is already scoped
+to that manager's active store, so it does not require a store selector.
+
+All query filters are combined with AND. The legacy product `branch` filter (store name
+or ERP code) remains supported and cannot broaden the authorized store scope. Combining
+incompatible filters returns an empty list.
+
+Resource operations resolve the store from the persisted record, not from a submitted filter:
+`GET /products/{id}`, `POST /flows/analyze`, `POST /actions/generate`, and
+`PATCH /actions/{id}/status` return `404` for missing or out-of-scope resources. Action
+scope follows `suggestion.store_id`, including suggestions without a product analysis.
+
+Inactive stores are excluded from operational queries, including analysis/action lists and
+dashboard metrics. No general `include_inactive` parameter is introduced. Existing user
+management detail routes retain their specific history rules; inactive manager accounts
+remain visible in lists when their last assigned store is active and permitted.
+
+`/branches` returns exactly the caller's permitted active stores. `/profile`, `/regions`,
+`/csrf`, health, Swagger, `/erp-integration/status`, and the separate IA chat integration
+do not acquire a `store_id` filter. Store filtering requires no Auth or schema changes.
+
+Examples:
+
+```text
+GET /dashboard/summary?store_id=17
+GET /products?store_id=17&category=Dairy
+GET /flows?store_id=17&flow_type=HIGH
+GET /actions?store_id=17&status=GENERATED
+GET /managers?store_id=17
+```
 
 ### Role access
 
@@ -135,7 +188,7 @@ attempting to assign a store outside the region returns `403`.
 
 | Method and route | Behavior |
 | --- | --- |
-| `GET /managers` | List active and inactive Gerentes. |
+| `GET /managers` | List active and inactive Gerentes in permitted active stores; optional `store_id`. |
 | `POST /managers` | Create a Gerente with a generic initial password. |
 | `GET /managers/{id}` | Read one Gerente. |
 | `PATCH /managers/{id}` | Update name/email/store or activate/deactivate the Gerente. |
@@ -296,7 +349,8 @@ no batch with positive stock.
 
 ### Optional filters
 
-Filters are applied after batch consolidation:
+Store authorization and product/category filters restrict the SQL source rows; the stock
+`status` filter is applied after batch consolidation:
 
 ```text
 GET /products?branch=Downtown%20Store
@@ -306,9 +360,11 @@ GET /products?status=true
 
 Available parameters:
 
-- `branch`: filters products by branch.
+- `store_id`: positive SQL ID of one permitted active store.
+- `branch`: legacy filter by store name or ERP code, within the permitted scope.
 - `category`: filters products by category.
-- `status`: filters active or inactive products.
+- `status`: `true` selects positive consolidated stock; `false` selects zero stock.
+  It never includes inactive stores/products.
 
 ---
 
@@ -436,6 +492,7 @@ GET /flows?status=ANALYZED
 
 Available parameters:
 
+- `store_id`: positive SQL ID of one permitted active store.
 - `flow_type`: `HIGH`, `MEDIUM`, or `LOW`.
 - `product_id`: filters flows for one product.
 - `status`: `ANALYZED` in the MVP; filters by analysis status.
@@ -548,6 +605,7 @@ GET /actions?flow_id=101
 Available parameters:
 
 - `status`: `GENERATED`, `IN_EMPLOYEE_TRIAGE`, `SENT_TO_MANAGER`, `APPROVED`, or `REJECTED`.
+- `store_id`: positive SQL ID of one permitted active store.
 - `action_type`: `PROMOTION` or `ORDER`.
 - `flow_id`: filters actions generated from one flow.
 
@@ -660,7 +718,9 @@ Method:
 Requires an active SQL account identified by the authenticated JWT subject. An active
 `GERENTE_REGIONAL` receives only active branches in their assigned active region; a missing
 or inactive region assignment returns `403`. The region is resolved from SQL, never from
-a client-provided parameter or role claim. Other active roles retain the active-branch list.
+a client-provided parameter or role claim. `ADMIN` receives all active stores;
+`GERENTE` and `FUNCIONARIO` receive only their actively assigned store. Missing or inactive
+store assignments return `403`. Unsupported roles and inactive accounts also return `403`.
 
 Response 200:
 
@@ -699,6 +759,11 @@ actions.
 Method:
 
 `GET /dashboard/summary`
+
+Optional query parameter: `store_id` (one positive numeric SQL store ID). Every metric uses
+the same authorized store scope. Without it, the response aggregates permitted active stores.
+`total_products` counts analyzed product/store pairs, not the full catalog. Risk metrics use
+the most recent analysis per pair (`created_at DESC`, then analysis ID DESC).
 
 Response 200:
 

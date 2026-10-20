@@ -1,9 +1,7 @@
 package com.quistock.ds_backend.repository;
 
 import com.quistock.ds_backend.model.dto.BranchDTO;
-import java.sql.Types;
 import java.util.List;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -15,18 +13,26 @@ public class BranchRepository {
     this.jdbc = jdbc;
   }
 
-  public List<BranchDTO> findActiveBranches(Long regionId) {
+  public boolean isActiveInScope(long storeId, StoreScope scope) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM store s WHERE s.id = :storeId " + StoreScope.SQL + ")",
+            scope.parameters().addValue("storeId", storeId),
+            Boolean.class));
+  }
+
+  public List<BranchDTO> findActiveBranches(StoreScope scope) {
     return jdbc.query(
         """
         SELECT s.id AS store_id, s.erp_id, s.name, s.region_id,
                a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a.postal_code
         FROM store s
         LEFT JOIN store_address a ON a.store_id = s.id
-        WHERE s.status = 'ACTIVE'
-          AND (:regionId IS NULL OR s.region_id = :regionId)
-        ORDER BY s.name
-        """,
-        new MapSqlParameterSource().addValue("regionId", regionId, Types.BIGINT),
+        WHERE TRUE
+        """
+            + StoreScope.SQL
+            + " ORDER BY s.name",
+        scope.parameters(),
         (resultSet, rowNumber) -> {
           String street = resultSet.getString("street");
           String number = resultSet.getString("number");

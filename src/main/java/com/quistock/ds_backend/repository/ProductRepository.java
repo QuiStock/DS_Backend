@@ -43,6 +43,8 @@ public class ProductRepository {
       WHERE ps.active = TRUE
         AND p.active = TRUE
         AND s.status = 'ACTIVE'
+        AND (:scopeStoreId IS NULL OR s.id = :scopeStoreId)
+        AND (:scopeRegionId IS NULL OR s.region_id = :scopeRegionId)
         AND (CAST(:productErpId AS text) IS NULL OR p.erp_id = :productErpId)
         AND (CAST(:storeErpId AS text) IS NULL OR s.erp_id = :storeErpId)
         AND (CAST(:branch AS text) IS NULL OR s.name = :branch OR s.erp_id = :branch)
@@ -64,9 +66,11 @@ public class ProductRepository {
     this.clock = clock;
   }
 
-  public List<ProductDTO> findAll(String branch, String category, Boolean status) {
+  public List<ProductDTO> findAll(
+      String branch, String category, Boolean status, StoreScope scope) {
     MapSqlParameterSource parameters =
-        new MapSqlParameterSource()
+        scope
+            .parameters()
             .addValue("branch", branch)
             .addValue("category", category)
             .addValue("status", status)
@@ -75,13 +79,14 @@ public class ProductRepository {
     return jdbc.query(PRODUCT_QUERY, parameters, productRowMapper());
   }
 
-  public Optional<ProductDTO> findByPublicId(String publicId) {
+  public Optional<ProductDTO> findByPublicId(String publicId, StoreScope scope) {
     ProductKey key = parsePublicId(publicId);
     if (key == null) {
       return Optional.empty();
     }
     MapSqlParameterSource parameters =
-        new MapSqlParameterSource()
+        scope
+            .parameters()
             .addValue("branch", null)
             .addValue("category", null)
             .addValue("status", null)

@@ -6,6 +6,7 @@ import com.quistock.ds_backend.model.dto.GenerateActionsRequest;
 import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
 import com.quistock.ds_backend.model.dto.UpdateActionStatusRequest;
 import com.quistock.ds_backend.service.ActionService;
+import com.quistock.ds_backend.service.UserAccessGuard;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
@@ -44,9 +45,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/actions")
 public class ActionController {
   private final ActionService actionService;
+  private final UserAccessGuard accessGuard;
 
-  public ActionController(ActionService service) {
+  public ActionController(ActionService service, UserAccessGuard accessGuard) {
     this.actionService = service;
+    this.accessGuard = accessGuard;
   }
 
   @PostMapping("/generate")
@@ -83,7 +86,7 @@ public class ActionController {
                 request.flowId(),
                 request.promotionValidFrom(),
                 request.promotionValidUntil(),
-                authenticatedUserId(jwt)));
+                accessGuard.requireStoreScope(authenticatedUserId(jwt), null)));
   }
 
   @GetMapping
@@ -109,8 +112,18 @@ public class ActionController {
   public List<ActionListItemDTO> listActions(
       @RequestParam(name = "status", required = false) String status,
       @RequestParam(name = "action_type", required = false) String actionType,
-      @RequestParam(name = "flow_id", required = false) String flowId) {
-    return actionService.listActions(status, actionType, flowId);
+      @RequestParam(name = "flow_id", required = false) String flowId,
+      @Parameter(
+              description =
+                  "ID SQL de uma loja ativa permitida. Omitir consolida o escopo do usuário.")
+          @RequestParam(name = "store_id", required = false)
+          Long storeId,
+      @AuthenticationPrincipal Jwt jwt) {
+    return actionService.listActions(
+        status,
+        actionType,
+        flowId,
+        accessGuard.requireStoreScope(authenticatedUserId(jwt), storeId));
   }
 
   @PatchMapping("/{id}/status")
@@ -145,7 +158,8 @@ public class ActionController {
       @PathVariable("id") String id,
       @Valid @RequestBody UpdateActionStatusRequest request,
       @AuthenticationPrincipal Jwt jwt) {
-    return actionService.updateActionStatus(id, request, authenticatedUserId(jwt));
+    return actionService.updateActionStatus(
+        id, request, accessGuard.requireStoreScope(authenticatedUserId(jwt), null));
   }
 
   private long authenticatedUserId(Jwt jwt) {
