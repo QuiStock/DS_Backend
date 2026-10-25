@@ -71,9 +71,9 @@ Without the filter, Core consolidates only the caller's permitted active stores:
 | SQL role | Store scope |
 | --- | --- |
 | `ADMIN` | All active stores. |
-| `GERENTE_REGIONAL` | Active stores in their assigned active region. |
-| `GERENTE` | Their single actively assigned store. |
-| `FUNCIONARIO` | Their single actively assigned store. |
+| `REGIONAL_MANAGER` | Active stores in their assigned active region. |
+| `MANAGER` | Their single actively assigned store. |
+| `EMPLOYEE` | Their single actively assigned store. |
 
 The SQL account must be active. Missing/inactive required assignments or unsupported roles
 return `403`. An explicit nonexistent, inactive, or unauthorized `store_id` returns `403`;
@@ -81,7 +81,7 @@ nonpositive or nonnumeric values return `400`. No matching records in an allowed
 return an empty list, or zero dashboard metrics. No query falls back to global data.
 
 Existing endpoint role restrictions still apply: `/managers` is restricted to `ADMIN` and
-`GERENTE_REGIONAL`; `/team-members` remains restricted to `GERENTE` and is already scoped
+`REGIONAL_MANAGER`; `/team-members` remains restricted to `MANAGER` and is already scoped
 to that manager's active store, so it does not require a store selector.
 
 All query filters are combined with AND. The legacy product `branch` filter (store name
@@ -117,9 +117,9 @@ GET /managers?store_id=17
 | Role | User-management access |
 | --- | --- |
 | `ADMIN` | Manage all Gerentes. |
-| `GERENTE` | Manage only `FUNCIONARIO` accounts assigned to the Gerente's store. |
-| `GERENTE_REGIONAL` | List, create, edit and deactivate Gerentes assigned to stores in the regional manager's active region. |
-| `FUNCIONARIO` | No manager/team CRUD access. |
+| `MANAGER` | Manage only `EMPLOYEE` accounts assigned to the Gerente's store. |
+| `REGIONAL_MANAGER` | List, create, edit and deactivate Gerentes assigned to stores in the regional manager's active region. |
+| `EMPLOYEE` | No manager/team CRUD access. |
 
 Before first use, the database must contain at least one active `ADMIN` account created through
 the approved bootstrap process. There is deliberately no public endpoint for creating the first
@@ -151,7 +151,7 @@ Response 200:
   "id": "42",
   "name": "Ana Silva",
   "email": "ana@example.com",
-  "role": "GERENTE",
+  "role": "MANAGER",
   "status": "ACTIVE",
   "profile_photo_url": null,
   "store_id": 17,
@@ -169,7 +169,7 @@ An inactive or missing account returns `403 Forbidden`.
 
 Method: `GET /regions`
 
-Available to `ADMIN`, `GERENTE` and `GERENTE_REGIONAL`. Only active ERP-backed regions are
+Available to `ADMIN`, `MANAGER` and `REGIONAL_MANAGER`. Only active ERP-backed regions are
 returned; a Regional Manager receives only their own active region. `id` is the internal SQL identifier.
 
 ```json
@@ -181,7 +181,7 @@ ERP code.
 
 ## 0.3 Manage Gerentes (ADM and Regional Manager web)
 
-All routes require an active `ADMIN` or `GERENTE_REGIONAL`. The ADM has global access; a
+All routes require an active `ADMIN` or `REGIONAL_MANAGER`. The ADM has global access; a
 Regional Manager must have an active region assignment and can only access Gerentes in that
 region, determined by `user_store → store.region_id`. Out-of-scope items return `404`;
 attempting to assign a store outside the region returns `403`.
@@ -219,14 +219,14 @@ must be assigned by an ADM before they can access the team API. No new schema ob
 
 ## 0.4 Manage team members (Gerente web)
 
-All routes require an active `GERENTE` with an active store assignment. The list and item
-routes return only `FUNCIONARIO` accounts in that store, regardless of who created them.
+All routes require an active `MANAGER` with an active store assignment. The list and item
+routes return only `EMPLOYEE` accounts in that store, regardless of who created them.
 For inactive employees, the most recent store assignment determines the scope.
 
 | Method and route | Behavior |
 | --- | --- |
 | `GET /team-members` | List store employees, including inactive accounts. |
-| `POST /team-members` | Create a `FUNCIONARIO` in the Gerente's store. |
+| `POST /team-members` | Create a `EMPLOYEE` in the Gerente's store. |
 | `GET /team-members/{id}` | Read one employee in the Gerente's store. |
 | `PATCH /team-members/{id}` | Update name/email/status or assignment. |
 
@@ -237,15 +237,15 @@ Employee request (the `store_id` comes from `GET /branches`):
   "name":"Maria Souza",
   "email":"maria@example.com",
   "password":"InitialPass123",
-  "role":"FUNCIONARIO",
+  "role":"EMPLOYEE",
   "store_id":17
 }
 ```
 
-A `FUNCIONARIO` must have exactly one active store assignment. Submitted `store_id` must match
+A `EMPLOYEE` must have exactly one active store assignment. Submitted `store_id` must match
 the authenticated Gerente's store; cross-store assignments return `403`. Deactivation closes
 the active assignment; reactivation requires an explicit `store_id` for that same store.
-`GERENTE_REGIONAL` and `region_id` are rejected with `400` by `/team-members`.
+`REGIONAL_MANAGER` and `region_id` are rejected with `400` by `/team-members`.
 Regional Manager accounts are provisioned separately through the administrative process;
 each has one active region assignment, and a region has only one active Regional Manager.
 
@@ -716,10 +716,10 @@ Method:
 `GET /branches`
 
 Requires an active SQL account identified by the authenticated JWT subject. An active
-`GERENTE_REGIONAL` receives only active branches in their assigned active region; a missing
+`REGIONAL_MANAGER` receives only active branches in their assigned active region; a missing
 or inactive region assignment returns `403`. The region is resolved from SQL, never from
 a client-provided parameter or role claim. `ADMIN` receives all active stores;
-`GERENTE` and `FUNCIONARIO` receive only their actively assigned store. Missing or inactive
+`MANAGER` and `EMPLOYEE` receive only their actively assigned store. Missing or inactive
 store assignments return `403`. Unsupported roles and inactive accounts also return `403`.
 
 Response 200:

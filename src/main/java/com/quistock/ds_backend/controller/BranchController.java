@@ -38,9 +38,10 @@ public class BranchController {
   @Operation(
       summary = "Listar filiais",
       description =
-          "Exige conta SQL ativa. ADMIN recebe todas as filiais ativas; GERENTE_REGIONAL recebe"
-              + " apenas filiais da sua região ativa. GERENTE e FUNCIONARIO recebem somente sua"
-              + " filial ativa; sem vínculo ativo retorna 403. Retorna id ERP, store_id e region_id internos.")
+          "Exige conta SQL ativa. ADMIN recebe todas as filiais ativas; REGIONAL_MANAGER recebe"
+              + " apenas filiais da sua região ativa. MANAGER e EMPLOYEE recebem somente sua filial"
+              + " ativa; sem vínculo ativo retorna 403. Retorna id ERP, store_id e region_id"
+              + " internos.")
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
   public List<BranchDTO> listBranches(@AuthenticationPrincipal Jwt jwt) {
     return branchService.listBranches(Long.parseLong(jwt.getSubject()));

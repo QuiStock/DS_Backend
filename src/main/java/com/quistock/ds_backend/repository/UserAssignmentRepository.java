@@ -30,11 +30,11 @@ public class UserAssignmentRepository {
     return jdbc
         .queryForList(
             """
-        SELECT s.region_id FROM store s
-        JOIN region_type rt ON rt.id = s.region_id AND rt.active = TRUE
-        WHERE s.id = :storeId AND s.status = 'ACTIVE'
-        FOR SHARE OF s, rt
-        """,
+            SELECT s.region_id FROM store s
+            JOIN region_type rt ON rt.id = s.region_id AND rt.active = TRUE
+            WHERE s.id = :storeId AND s.status = 'ACTIVE'
+            FOR SHARE OF s, rt
+            """,
             Map.of(STORE_ID_PARAMETER, storeId),
             Long.class)
         .stream()
@@ -52,14 +52,14 @@ public class UserAssignmentRepository {
     Boolean exists =
         jdbc.queryForObject(
             """
-        SELECT EXISTS (
-          SELECT 1 FROM user_store us
-          JOIN user_account u ON u.id = us.user_id
-          JOIN role r ON r.id = u.role_id
-          WHERE us.store_id = :storeId AND us.active = TRUE
-            AND u.status = 'ACTIVE' AND r.code = 'FUNCIONARIO'
-        )
-        """,
+            SELECT EXISTS (
+              SELECT 1 FROM user_store us
+              JOIN user_account u ON u.id = us.user_id
+              JOIN role r ON r.id = u.role_id
+              WHERE us.store_id = :storeId AND us.active = TRUE
+                AND u.status = 'ACTIVE' AND r.code = 'EMPLOYEE'
+            )
+            """,
             Map.of(STORE_ID_PARAMETER, storeId),
             Boolean.class);
     return Boolean.TRUE.equals(exists);
