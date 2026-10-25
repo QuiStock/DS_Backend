@@ -28,7 +28,7 @@ public class UserAccountReadRepository {
       LEFT JOIN store s ON s.id = us.store_id
       LEFT JOIN region_manager_assignment rma ON rma.user_id = u.id AND rma.active = TRUE
       LEFT JOIN region_type rt ON rt.id = CASE
-        WHEN r.code = 'GERENTE_REGIONAL' THEN rma.region_id ELSE s.region_id END
+        WHEN r.code = 'REGIONAL_MANAGER' THEN rma.region_id ELSE s.region_id END
       """;
 
   private final NamedParameterJdbcTemplate jdbc;
@@ -54,10 +54,10 @@ public class UserAccountReadRepository {
     return jdbc
         .queryForList(
             """
-        SELECT us.store_id FROM user_store us
-        JOIN store s ON s.id = us.store_id AND s.status = 'ACTIVE'
-        WHERE us.user_id = :userId AND us.active = TRUE
-        """,
+            SELECT us.store_id FROM user_store us
+            JOIN store s ON s.id = us.store_id AND s.status = 'ACTIVE'
+            WHERE us.user_id = :userId AND us.active = TRUE
+            """,
             Map.of("userId", userId),
             Long.class)
         .stream()
@@ -69,7 +69,7 @@ public class UserAccountReadRepository {
   }
 
   public Optional<UserDTO> findManager(long id) {
-    return findOne(USER_PROJECTION + " WHERE u.id = :id AND r.code = 'GERENTE'", Map.of("id", id));
+    return findOne(USER_PROJECTION + " WHERE u.id = :id AND r.code = 'MANAGER'", Map.of("id", id));
   }
 
   public Optional<UserDTO> findTeamMember(long id, long managerId) {
@@ -78,14 +78,14 @@ public class UserAccountReadRepository {
       return Optional.empty();
     }
     return findOne(
-        USER_PROJECTION + " WHERE u.id = :id AND r.code = 'FUNCIONARIO' AND s.id = :storeId",
+        USER_PROJECTION + " WHERE u.id = :id AND r.code = 'EMPLOYEE' AND s.id = :storeId",
         Map.of("id", id, "storeId", storeId));
   }
 
   public List<UserDTO> findManagers(StoreScope scope) {
     return jdbc.query(
         USER_PROJECTION
-            + " WHERE r.code = 'GERENTE'"
+            + " WHERE r.code = 'MANAGER'"
             + StoreScope.SQL
             + " ORDER BY LOWER(u.name), u.id",
         scope.parameters(),
@@ -96,10 +96,10 @@ public class UserAccountReadRepository {
     return jdbc
         .queryForList(
             """
-        SELECT rma.region_id FROM region_manager_assignment rma
-        JOIN region_type rt ON rt.id = rma.region_id AND rt.active = TRUE
-        WHERE rma.user_id = :userId AND rma.active = TRUE
-        """,
+            SELECT rma.region_id FROM region_manager_assignment rma
+            JOIN region_type rt ON rt.id = rma.region_id AND rt.active = TRUE
+            WHERE rma.user_id = :userId AND rma.active = TRUE
+            """,
             Map.of("userId", userId),
             Long.class)
         .stream()
@@ -113,7 +113,7 @@ public class UserAccountReadRepository {
     }
     return jdbc.query(
         USER_PROJECTION
-            + " WHERE r.code = 'FUNCIONARIO' AND s.id = :storeId ORDER BY LOWER(u.name), u.id",
+            + " WHERE r.code = 'EMPLOYEE' AND s.id = :storeId ORDER BY LOWER(u.name), u.id",
         Map.of("storeId", storeId),
         UserAccountReadRepository::mapUser);
   }

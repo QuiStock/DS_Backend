@@ -38,7 +38,7 @@ public class RegionController {
   @Operation(
       summary = "Listar regiões",
       description =
-          "ADMIN e GERENTE consultam regiões ERP ativas; GERENTE_REGIONAL consulta apenas"
+          "ADMIN e MANAGER consultam regiões ERP ativas; REGIONAL_MANAGER consulta apenas"
               + " sua própria região ativa. Retorna IDs internos.")
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
   public List<RegionDTO> listRegions(@AuthenticationPrincipal Jwt jwt) {

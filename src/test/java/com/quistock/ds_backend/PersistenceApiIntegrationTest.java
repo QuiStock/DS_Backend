@@ -287,7 +287,7 @@ class PersistenceApiIntegrationTest {
         "test-hash");
     jdbc.update(
         "INSERT INTO user_account (id, role_id, name, email, password_hash) "
-            + "VALUES (?, (SELECT id FROM role WHERE code = 'GERENTE'), ?, ?, ?)",
+            + "VALUES (?, (SELECT id FROM role WHERE code = 'MANAGER'), ?, ?, ?)",
         1003L,
         "Manager User",
         "manager@test.example",
@@ -306,12 +306,15 @@ class PersistenceApiIntegrationTest {
     jdbc.update(
         "INSERT INTO user_account (id, role_id, name, email, password_hash) "
             + "SELECT 1004, id, 'Regional Manager', 'regional@test.example', 'test-hash' "
-            + "FROM role WHERE code = 'GERENTE_REGIONAL'");
+            + "FROM role WHERE code = 'REGIONAL_MANAGER'");
     jdbc.update(
         "INSERT INTO region_manager_assignment (user_id, region_id) VALUES (1004, ?)", regionId);
     String regionalToken = tokenFor(1004L, "regional@test.example");
 
-    assertThat(getAs("/profile", 200, managerToken).path("role").asString()).isEqualTo("GERENTE");
+    assertThat(getAs("/profile", 200, managerToken).path("role").asString()).isEqualTo("MANAGER");
+    JsonNode managerBranches = getAs("/branches", 200, managerToken);
+    assertThat(managerBranches.size()).isEqualTo(1);
+    assertThat(managerBranches.get(0).path("store_id").asLong()).isEqualTo(storeOne);
     assertThat(getAs("/managers", 200, adminToken).size()).isEqualTo(1);
     assertThat(getAs("/managers/1003", 200, regionalToken).path("email").asString())
         .isEqualTo("manager@test.example");
@@ -327,17 +330,23 @@ class PersistenceApiIntegrationTest {
         postAs(
             "/team-members",
             """
-        {"name":"Store Employee","email":"employee@test.example","password":"GenericPass123",
-         "role":"FUNCIONARIO","store_id":%d}
-        """
+            {"name":"Store Employee","email":"employee@test.example","password":"GenericPass123",
+             "role":"EMPLOYEE","store_id":%d}
+            """
                 .formatted(storeOne),
             201,
             managerToken);
     String employeeId = employee.path("id").asString();
+    String employeeToken = tokenFor(Long.parseLong(employeeId), "employee@test.example");
+    JsonNode employeeBranches = getAs("/branches", 200, employeeToken);
+    assertThat(employeeBranches.size()).isEqualTo(1);
+    assertThat(employeeBranches.get(0).path("store_id").asLong()).isEqualTo(storeOne);
+    getAs("/managers", 403, employeeToken);
+    getAs("/team-members", 403, employeeToken);
     getAs("/regions", 403, tokenFor(Long.parseLong(employeeId), "employee@test.example"));
     assertThat(getAs("/team-members/" + employeeId, 200, managerToken).path("id").asString())
         .isEqualTo(employeeId);
-    assertThat(employee.path("role").asString()).isEqualTo("FUNCIONARIO");
+    assertThat(employee.path("role").asString()).isEqualTo("EMPLOYEE");
     assertThat(employee.has("password")).isFalse();
     assertThat(employee.has("password_hash")).isFalse();
     assertThat(
@@ -356,7 +365,7 @@ class PersistenceApiIntegrationTest {
         "/team-members",
         """
         {"name":"Missing Store","email":"missing-store@test.example",
-         "password":"GenericPass123","role":"FUNCIONARIO"}
+         "password":"GenericPass123","role":"EMPLOYEE"}
         """,
         400,
         managerToken);
@@ -364,7 +373,7 @@ class PersistenceApiIntegrationTest {
         "/team-members",
         """
         {"name":"Duplicate Employee","email":"EMPLOYEE@test.example",
-         "password":"GenericPass123","role":"FUNCIONARIO","store_id":%d}
+         "password":"GenericPass123","role":"EMPLOYEE","store_id":%d}
         """
             .formatted(storeOne),
         409,
@@ -373,7 +382,7 @@ class PersistenceApiIntegrationTest {
         "/team-members",
         """
         {"name":"Missing Store","email":"missing-store-id@test.example",
-         "password":"GenericPass123","role":"FUNCIONARIO","store_id":999999}
+         "password":"GenericPass123","role":"EMPLOYEE","store_id":999999}
         """,
         404,
         managerToken);
@@ -390,7 +399,7 @@ class PersistenceApiIntegrationTest {
         "/team-members",
         """
         {"name":"Regional Manager","email":"new-regional@test.example","password":"GenericPass123",
-         "role":"GERENTE_REGIONAL","region_id":%d}
+         "role":"REGIONAL_MANAGER","region_id":%d}
         """
             .formatted(regionId),
         400,
@@ -400,7 +409,7 @@ class PersistenceApiIntegrationTest {
         "/team-members",
         """
         {"name":"Invalid Employee","email":"bad-assignment@test.example","password":"GenericPass123",
-         "role":"FUNCIONARIO","store_id":%d,"region_id":%d}
+         "role":"EMPLOYEE","store_id":%d,"region_id":%d}
         """
             .formatted(storeOne, regionId),
         400,
@@ -426,15 +435,15 @@ class PersistenceApiIntegrationTest {
         200,
         managerToken);
     patchAs("/team-members/" + employeeId, "{\"status\":\"UNKNOWN\"}", 400, managerToken);
-    patchAs("/team-members/" + employeeId, "{\"role\":\"GERENTE\"}", 400, managerToken);
+    patchAs("/team-members/" + employeeId, "{\"role\":\"MANAGER\"}", 400, managerToken);
 
     JsonNode replacement =
         postAs(
             "/managers",
             """
-        {"name":"Replacement Manager","email":"replacement@test.example",
-         "password":"GenericPass123","store_id":%d}
-        """
+            {"name":"Replacement Manager","email":"replacement@test.example",
+             "password":"GenericPass123","store_id":%d}
+            """
                 .formatted(storeOne),
             201,
             regionalToken);
@@ -513,7 +522,7 @@ class PersistenceApiIntegrationTest {
             .POST(
                 HttpRequest.BodyPublishers.ofString(
                     "{\"name\":\"Cookie User\",\"email\":\"cookie-user@test.example\","
-                        + "\"password\":\"GenericPass123\",\"role\":\"FUNCIONARIO\",\"store_id\":1}"))
+                        + "\"password\":\"GenericPass123\",\"role\":\"EMPLOYEE\",\"store_id\":1}"))
             .build();
     assertThat(http.send(missingCsrf, HttpResponse.BodyHandlers.ofString()).statusCode())
         .isEqualTo(403);
@@ -527,7 +536,7 @@ class PersistenceApiIntegrationTest {
             .POST(
                 HttpRequest.BodyPublishers.ofString(
                     "{\"name\":\"Cookie User\",\"email\":\"cookie-user@test.example\","
-                        + "\"password\":\"GenericPass123\",\"role\":\"FUNCIONARIO\",\"store_id\":"
+                        + "\"password\":\"GenericPass123\",\"role\":\"EMPLOYEE\",\"store_id\":"
                         + activeStore
                         + "}"))
             .build();

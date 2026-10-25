@@ -16,7 +16,7 @@ e ajuste as credenciais, o endereço do ERP e as variáveis `AUTH_JWT_*` para a 
 ### Carga manual de usuários de desenvolvimento
 
 Depois que o schema estiver aplicado, execute `database/bootstrap-dev.sql` para criar os perfis
-`GERENTE_REGIONAL` e `FUNCIONARIO` e uma conta local de cada tipo. O script usa hashes BCrypt,
+`REGIONAL_MANAGER` e `EMPLOYEE` e uma conta local de cada tipo. O script usa hashes BCrypt,
 é idempotente para os perfis e emails já existentes e não é executado automaticamente pela API.
 No PowerShell, use `psql "$env:DB_URL" -v ON_ERROR_STOP=1 -f .\database\bootstrap-dev.sql`.
 
@@ -45,8 +45,8 @@ Core também mantém perfis e cadastros de usuários no PostgreSQL. `GET /profil
 perfil pelo `sub` do JWT. ADM gerencia todos os `/managers`; Gerente Regional consulta,
 cadastra, edita e desativa apenas os gerentes de sua região. Gerente gerencia somente os
 funcionários da própria filial em `/team-members`. Senhas iniciais são armazenadas com BCrypt cost 12. DS_Auth continua responsável
-por login e sessão. Os códigos de perfil no SQL são `ADMIN`, `GERENTE`, `GERENTE_REGIONAL` e
-`FUNCIONARIO`.
+por login e sessão. Os códigos de perfil no SQL são `ADMIN`, `MANAGER`, `REGIONAL_MANAGER` e
+`EMPLOYEE`.
 
 O token pode chegar como cookie HTTP-only `access_token` ou como Bearer token. Para mutations
 via cookie, o cliente consulta `GET /csrf` e devolve o cookie `XSRF-TOKEN` no header
@@ -60,10 +60,14 @@ normalização e garante uma única filial ativa por usuário. Antes de aplicá-
 dados, resolva e-mails que colidam após trim/lowercase, contas com mais de uma filial ativa e
 contas ativas `FUNCIONARIO`/`GERENTE_REGIONAL` sem sua atribuição obrigatória; a migration
 interrompe com erro explicativo em vez de escolher um registro arbitrariamente.
+A migration `V6` consolida os códigos antigos `GERENTE`, `GERENTE_REGIONAL`, `FUNCIONARIO`
+e `REPOSITOR` em `MANAGER`, `REGIONAL_MANAGER` e `EMPLOYEE`, preservando contas e permissões.
+Roles canônicas existentes são reutilizadas. `ADMIN` mantém seu acesso administrativo.
 `GET /branches` exige conta SQL ativa, preserva `id` como código ERP e inclui `store_id` e
-`region_id` numéricos internos. Para `GERENTE_REGIONAL`, retorna apenas filiais ativas da
+`region_id` numéricos internos. Para `REGIONAL_MANAGER`, retorna apenas filiais ativas da
 própria região ativa; sem atribuição válida retorna 403. O Web deve usar essa lista no
-seletor de filial. Os demais perfis ativos mantêm a consulta de filiais ativas.
+seletor de filial. `MANAGER` e `EMPLOYEE` recebem apenas sua filial ativa e precisam de
+vínculo ativo em `user_store`; `ADMIN` recebe todas as filiais ativas.
 `GET /regions` é alimentada pelo `region_id` do ERP; sem nome de região no ERP, o código também
 é usado como nome inicial.
 Antes de usar `/managers`, o banco precisa conter um `ADMIN` ativo provisionado pelo processo
@@ -71,7 +75,7 @@ seguro de bootstrap. A API não oferece cadastro público do primeiro ADM.
 
 ### Hierarquia de usuários
 
-A hierarquia é `GERENTE_REGIONAL → GERENTE → FUNCIONARIO`. O regional tem uma região
+A hierarquia é `REGIONAL_MANAGER → MANAGER → EMPLOYEE`. O regional tem uma região
 ativa em `region_manager_assignment`; cada gerente e funcionário tem uma filial ativa em
 `user_store`. A região de `store.region_id` determina quais gerentes o regional pode gerenciar.
 `created_by_id` preserva quem cadastrou a conta e não é alterado para transferir responsabilidade.

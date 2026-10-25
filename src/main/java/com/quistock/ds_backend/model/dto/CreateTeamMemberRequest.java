@@ -16,7 +16,7 @@ public record CreateTeamMemberRequest(
         @NotBlank
         @Size(min = 8, max = 72)
         String password,
-    @Schema(allowableValues = {"FUNCIONARIO"}) @NotBlank String role,
+    @Schema(allowableValues = {"EMPLOYEE"}) @NotBlank String role,
     @Schema(description = "ID SQL da filial do gerente autenticado; obrigatório.")
         @JsonProperty("store_id")
         Long storeId,

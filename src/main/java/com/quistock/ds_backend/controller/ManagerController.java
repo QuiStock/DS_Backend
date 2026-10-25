@@ -51,7 +51,7 @@ public class ManagerController {
   @Operation(
       summary = "Listar gerentes",
       description =
-          "ADMIN consulta todos; GERENTE_REGIONAL consulta apenas gerentes de sua região."
+          "ADMIN consulta todos; REGIONAL_MANAGER consulta apenas gerentes de sua região."
               + " Inclui contas inativas pela última filial vinculada.")
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
   @ApiResponse(
@@ -74,8 +74,8 @@ public class ManagerController {
   @Operation(
       summary = "Cadastrar gerente",
       description =
-          "Exige ADMIN ou GERENTE_REGIONAL. Exige store_id de filial ativa com região;"
-              + " o regional só cadastra na própria região. Define GERENTE e salva senha como BCrypt.")
+          "Exige ADMIN ou REGIONAL_MANAGER. Exige store_id de filial ativa com região; o regional"
+              + " só cadastra na própria região. Define MANAGER e salva senha como BCrypt.")
   @ApiResponse(responseCode = "201", description = "Recurso criado.")
   @ApiResponse(
       responseCode = "400",
@@ -112,7 +112,7 @@ public class ManagerController {
   @GetMapping("/{id}")
   @Operation(
       summary = "Consultar gerente",
-      description = "Exige ADMIN ou GERENTE_REGIONAL da região da filial do gerente.",
+      description = "Exige ADMIN ou REGIONAL_MANAGER da região da filial do gerente.",
       parameters = {@Parameter(name = "id", description = "ID SQL do gerente.")})
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
   @ApiResponse(
@@ -129,9 +129,10 @@ public class ManagerController {
   @Operation(
       summary = "Atualizar gerente",
       description =
-          "Exige ADMIN ou GERENTE_REGIONAL da região. Filial de destino deve estar na mesma região"
+          "Exige ADMIN ou REGIONAL_MANAGER da região. Filial de destino deve estar na mesma região"
               + " para o regional. Reativação exige store_id. Desativação com funcionários ativos"
-              + " exige replacement_manager_id ativo na mesma filial. Preserva autoria e histórico.",
+              + " exige replacement_manager_id ativo na mesma filial. Preserva autoria e"
+              + " histórico.",
       parameters = {@Parameter(name = "id", description = "ID SQL do gerente.")})
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
   @ApiResponse(
