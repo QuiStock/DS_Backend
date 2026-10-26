@@ -200,6 +200,11 @@ class PersistenceApiIntegrationTest {
             + LocalDate.now().plusDays(5)
             + "\"}";
     post("/actions/generate", orderBody, 403);
+    postAs(
+        "/actions/generate",
+        orderBody.replace("\"quantity\":20", "\"quantity\":20.5"),
+        400,
+        employeeNorth);
     JsonNode order = postAs("/actions/generate", orderBody, 201, employeeNorth);
     assertThat(postAs("/actions/generate", orderBody, 201, employeeNorth)).isEqualTo(order);
     String newerHighFlowId = analyze("SKU-HIGH:STORE-1", "HIGH");
@@ -208,6 +213,11 @@ class PersistenceApiIntegrationTest {
         "{\"flow_id\":\""
             + lowFlowId
             + "\",\"action_type\":\"PROMOTION\",\"discount_percentage\":15,\"promotion_duration_days\":7}";
+    postAs(
+        "/actions/generate",
+        promotionBody.replace("\"discount_percentage\":15", "\"discount_percentage\":15.123"),
+        400,
+        employeeSouth);
     JsonNode promotion = postAs("/actions/generate", promotionBody, 201, employeeSouth);
     assertThat(order.path("generated_actions").get(0).path("quantity").asInt()).isEqualTo(20);
     assertThat(promotion.path("generated_actions").get(0).path("discount_percentage").asInt())

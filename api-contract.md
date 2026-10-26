@@ -572,9 +572,9 @@ Alternatively send both `promotion_valid_from` and `promotion_valid_until` inste
 `promotion_duration_days`. Duration starts on the business date of the request and is
 inclusive: one day means start=end=today. Do not combine duration and explicit dates.
 
-- ORDER requires a positive integer quantity and desired date >= today, with no promotion
+- ORDER requires a positive whole quantity <= 2147483647 and desired date >= today, with no promotion
   fields. The date is requested by the user and is not a delivery guarantee.
-- PROMOTION requires discount from 0 to 100 inclusive and a complete valid period, starting
+- PROMOTION requires discount from 0 to 100 inclusive, at most two decimal places, and a complete valid period, starting
   today or later. No quantity/order-date fields are accepted. Duration is 1..36500 days.
 - ORDER is compatible with STOCKOUT; PROMOTION with NEAR_EXPIRY or EXPIRATION, provided
   EXPIRED is absent. Classification alone never determines the action type.
