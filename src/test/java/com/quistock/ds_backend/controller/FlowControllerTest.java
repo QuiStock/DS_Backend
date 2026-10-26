@@ -160,7 +160,11 @@ class FlowControllerTest {
   private MockMvc mockMvc(FlowService flowService) {
     UserAccessGuard accessGuard = mock(UserAccessGuard.class);
     when(accessGuard.requireStoreScope(1001L, null)).thenReturn(SCOPE);
-    return MockMvcBuilders.standaloneSetup(new FlowController(flowService, accessGuard))
+    return MockMvcBuilders.standaloneSetup(
+            new FlowController(
+                flowService,
+                accessGuard,
+                mock(com.quistock.ds_backend.service.LoginAnalysisService.class)))
         .setCustomArgumentResolvers(
             new HandlerMethodArgumentResolver() {
               @Override
@@ -197,6 +201,10 @@ class FlowControllerTest {
         new BigDecimal("9.92"),
         0,
         3,
-        Instant.parse("2026-08-28T12:00:00Z"));
+        Instant.parse("2026-08-28T12:00:00Z"),
+        java.util.List.of(),
+        "SALES_PERCENTILES_V1",
+        true,
+        1L);
   }
 }

@@ -3,73 +3,97 @@ package com.quistock.ds_backend.service;
 import com.quistock.ds_backend.model.dto.ProductDTO;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.stereotype.Component;
 
 @Component
 class FlowAnalysisCalculator {
-  private static final BigDecimal DAYS_IN_WEEK = BigDecimal.valueOf(7);
-  private static final BigDecimal DAYS_IN_MONTH = BigDecimal.valueOf(30);
-  private static final BigDecimal ZERO_DAYS = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+  private static final int NEAR_EXPIRY_DAYS = 7;
+  static final String CLASSIFIER = "SALES_PERCENTILES_V1";
+  private static final BigDecimal SEVEN = BigDecimal.valueOf(7);
 
-  Result calculate(ProductDTO product) {
-    BigDecimal dailySalesAverage = calculateDailySalesAverage(product);
-    BigDecimal stockCoverageDays = calculateCoverage(product, dailySalesAverage);
-    Classification classification = classify(product, stockCoverageDays);
+  Result calculate(ProductDTO product, List<BigDecimal> peers) {
+    BigDecimal sales = decimal(product.sales7d());
+    BigDecimal daily = sales == null ? null : sales.divide(SEVEN, 6, RoundingMode.HALF_UP);
+    BigDecimal stock = decimal(product.currentStock());
+    BigDecimal coverage =
+        daily == null || daily.signum() == 0 || stock == null
+            ? null
+            : stock.divide(daily, 6, RoundingMode.HALF_UP);
+    String type = classify(sales, peers);
     return new Result(
-        classification.type(),
-        classification.reason(),
-        dailySalesAverage,
-        stockCoverageDays,
-        decimal(product.currentStock()),
+        type,
+        type == null
+            ? "Missing sales, category/unit or fewer than five comparable products."
+            : "Sales speed compared with the same category, unit and store.",
+        daily,
+        coverage,
+        stock,
         decimal(product.minimumStock()),
-        decimal(product.sales7d()),
-        decimal(product.sales30d()));
+        sales,
+        decimal(product.sales30d()),
+        risks(product, daily, coverage));
   }
 
-  private BigDecimal calculateDailySalesAverage(ProductDTO product) {
-    BigDecimal sales7d = valueOrZero(product.sales7d());
-    BigDecimal sales30d = valueOrZero(product.sales30d());
-    if (sales7d.signum() > 0) {
-      return sales7d.divide(DAYS_IN_WEEK, 2, RoundingMode.HALF_UP);
+  private String classify(BigDecimal sales, List<BigDecimal> peers) {
+    if (sales == null || peers.size() < 5) {
+      return null;
     }
-    if (sales30d.signum() > 0) {
-      return sales30d.divide(DAYS_IN_MONTH, 2, RoundingMode.HALF_UP);
+    if (sales.signum() == 0) {
+      return "LOW";
     }
-    return ZERO_DAYS;
+    List<BigDecimal> sorted = peers.stream().sorted().toList();
+    if (sales.compareTo(percentile(sorted, new BigDecimal("0.25"))) < 0) {
+      return "LOW";
+    }
+    return sales.compareTo(percentile(sorted, new BigDecimal("0.75"))) > 0 ? "HIGH" : "MEDIUM";
   }
 
-  private BigDecimal calculateCoverage(ProductDTO product, BigDecimal dailySalesAverage) {
-    if (dailySalesAverage.signum() == 0) {
-      return ZERO_DAYS;
-    }
-    return valueOrZero(product.currentStock()).divide(dailySalesAverage, 2, RoundingMode.HALF_UP);
+  private BigDecimal percentile(List<BigDecimal> sorted, BigDecimal fraction) {
+    BigDecimal position = fraction.multiply(BigDecimal.valueOf(sorted.size() - 1L));
+    int lower = position.intValue();
+    BigDecimal weight = position.subtract(BigDecimal.valueOf(lower));
+    BigDecimal left = sorted.get(lower);
+    return lower + 1 == sorted.size()
+        ? left
+        : left.add(sorted.get(lower + 1).subtract(left).multiply(weight));
   }
 
-  private Classification classify(ProductDTO product, BigDecimal stockCoverageDays) {
-    Integer expirationDays = product.expirationDays();
-    if (expirationDays != null
-        && BigDecimal.valueOf(expirationDays).compareTo(stockCoverageDays) <= 0) {
-      return new Classification("LOW", "Product is expired or close to expiration.");
+  private List<String> risks(ProductDTO product, BigDecimal daily, BigDecimal coverage) {
+    List<String> risks = new ArrayList<>();
+    BigDecimal stock = decimal(product.currentStock());
+    if (stock == null) {
+      return List.of();
     }
-
-    BigDecimal currentStock = valueOrZero(product.currentStock());
-    if (stockCoverageDays.signum() == 0 && currentStock.signum() > 0) {
-      return new Classification("LOW", "Product has no recent sales and has available stock.");
+    BigDecimal minimum = decimal(product.minimumStock());
+    boolean belowLeadTime =
+        coverage != null
+            && product.supplierLeadTime() != null
+            && coverage.compareTo(BigDecimal.valueOf(product.supplierLeadTime())) <= 0;
+    if (stock.signum() <= 0 || minimum != null && stock.compareTo(minimum) < 0 || belowLeadTime) {
+      risks.add("STOCKOUT");
     }
-
-    BigDecimal minimumStock = valueOrZero(product.minimumStock());
-    int leadTime = product.supplierLeadTime() == null ? 0 : product.supplierLeadTime();
-    if (currentStock.signum() <= 0
-        || currentStock.compareTo(minimumStock) < 0
-        || stockCoverageDays.compareTo(BigDecimal.valueOf(leadTime)) <= 0) {
-      return new Classification(
-          "HIGH", "Stockout risk: stock is below minimum or coverage is below supplier lead time.");
-    }
-    return new Classification("MEDIUM", "Stock is adequate for current demand.");
+    appendExpirationRisks(product.expirationDays(), stock, daily, coverage, risks);
+    return List.copyOf(risks);
   }
 
-  private BigDecimal valueOrZero(Number value) {
-    return value == null ? BigDecimal.ZERO : new BigDecimal(value.toString());
+  private void appendExpirationRisks(
+      Integer days, BigDecimal stock, BigDecimal daily, BigDecimal coverage, List<String> risks) {
+    if (days == null || stock.signum() <= 0) {
+      return;
+    }
+    if (days < 0) {
+      risks.add("EXPIRED");
+      return;
+    }
+    if (days <= NEAR_EXPIRY_DAYS) {
+      risks.add("NEAR_EXPIRY");
+    }
+    if (daily != null && daily.signum() == 0
+        || coverage != null && coverage.compareTo(BigDecimal.valueOf(days)) >= 0) {
+      risks.add("EXPIRATION");
+    }
   }
 
   private BigDecimal decimal(Number value) {
@@ -84,7 +108,6 @@ class FlowAnalysisCalculator {
       BigDecimal currentStock,
       BigDecimal minimumStock,
       BigDecimal sales7d,
-      BigDecimal sales30d) {}
-
-  private record Classification(String type, String reason) {}
+      BigDecimal sales30d,
+      List<String> risks) {}
 }

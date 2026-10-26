@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -19,7 +20,17 @@ import tools.jackson.databind.ObjectMapper;
 public class FlowRepository {
   private static final String FLOW_SELECT =
       """
-      SELECT pa.id,
+      SELECT pa.id, pa.store_id,
+             COALESCE(pa.context ->> 'classifier', 'RULE_ENGINE') AS classifier,
+             COALESCE(pa.context ->> 'analysis_status', 'ANALYZED') AS analysis_status,
+             COALESCE(pa.context -> 'risks', '[]'::jsonb)::text AS risks,
+             (pa.context ->> 'classifier' = 'SALES_PERCENTILES_V1' AND p.active = TRUE
+               AND EXISTS (SELECT 1 FROM product_store current_ps
+                 WHERE current_ps.product_id = pa.product_id AND current_ps.store_id = pa.store_id
+                   AND current_ps.active = TRUE)
+               AND NOT EXISTS (SELECT 1 FROM product_analysis newer
+                 WHERE newer.store_id = pa.store_id AND newer.product_id = pa.product_id
+                   AND (newer.created_at, newer.id) > (pa.created_at, pa.id))) AS is_current,
              p.erp_id || ':' || s.erp_id AS public_product_id,
              p.name AS product_name,
              ft.code::text AS flow_type,
@@ -32,7 +43,7 @@ public class FlowRepository {
       FROM product_analysis pa
       JOIN product p ON p.id = pa.product_id
       JOIN store s ON s.id = pa.store_id
-      JOIN flow_type_catalog ft ON ft.id = pa.flow_type_id
+      LEFT JOIN flow_type_catalog ft ON ft.id = pa.flow_type_id
       """;
 
   private final NamedParameterJdbcTemplate jdbc;
@@ -49,6 +60,19 @@ public class FlowRepository {
       return -1;
     }
 
+    jdbc.query(
+        """
+        SELECT ps.id FROM product_store ps JOIN product p ON p.id = ps.product_id
+        JOIN store s ON s.id = ps.store_id
+        WHERE p.erp_id = :productErpId AND s.erp_id = :storeErpId
+        """
+            + StoreScope.SQL
+            + " FOR UPDATE OF ps",
+        scope
+            .parameters()
+            .addValue("productErpId", key.productErpId())
+            .addValue("storeErpId", key.storeErpId()),
+        (row, index) -> row.getLong(1));
     Map<String, Object> metrics = new HashMap<>();
     metrics.put("daily_sales_average", analysis.dailySalesAverage());
     metrics.put("stock_coverage_days", analysis.stockCoverageDays());
@@ -58,7 +82,16 @@ public class FlowRepository {
     metrics.put("sales_30d", analysis.sales30d());
     metrics.put("expiration_days", analysis.expirationDays());
     metrics.put("supplier_lead_time", analysis.supplierLeadTime());
-    Map<String, Object> context = Map.of("reason", analysis.reason(), "classifier", "RULE_ENGINE");
+    Map<String, Object> context =
+        Map.of(
+            "reason",
+            analysis.reason(),
+            "classifier",
+            "SALES_PERCENTILES_V1",
+            "analysis_status",
+            analysis.flowType() == null ? "INSUFFICIENT_DATA" : "ANALYZED",
+            "risks",
+            analysis.risks());
 
     MapSqlParameterSource parameters =
         scope
@@ -81,7 +114,7 @@ public class FlowRepository {
             FROM product_store ps
             JOIN product p ON p.id = ps.product_id
             JOIN store s ON s.id = ps.store_id
-            JOIN flow_type_catalog ft ON ft.code = CAST(:flowType AS flow_type)
+            LEFT JOIN flow_type_catalog ft ON ft.code = CAST(:flowType AS flow_type)
             WHERE p.erp_id = :productErpId
               AND s.erp_id = :storeErpId
               AND ps.active = TRUE
@@ -113,8 +146,12 @@ public class FlowRepository {
             + " = :storeErpId))"
             + StoreScope.SQL
             + " ORDER BY pa.created_at DESC, pa.id DESC";
-    if (status != null && !"ANALYZED".equals(status)) {
-      return List.of();
+    if (status != null) {
+      sql =
+          sql.replace(
+              " ORDER BY",
+              " AND COALESCE(pa.context ->> 'analysis_status', 'ANALYZED') = :analysisStatus ORDER BY");
+      parameters.addValue("analysisStatus", status);
     }
     return jdbc.query(sql, parameters, (resultSet, rowNumber) -> toFlow(resultSet));
   }
@@ -139,13 +176,62 @@ public class FlowRepository {
         resultSet.getString("public_product_id"),
         resultSet.getString("product_name"),
         resultSet.getString("flow_type"),
-        "ANALYZED",
+        resultSet.getString("analysis_status"),
         resultSet.getString("reason"),
         resultSet.getBigDecimal("daily_sales_average"),
         resultSet.getBigDecimal("stock_coverage_days"),
         resultSet.getObject("expiration_days", Integer.class),
         resultSet.getObject("supplier_lead_time", Integer.class),
-        analysisDate == null ? null : analysisDate.toInstant());
+        analysisDate == null ? null : analysisDate.toInstant(),
+        readRisks(resultSet.getString("risks")),
+        resultSet.getString("classifier"),
+        resultSet.getBoolean("is_current"),
+        resultSet.getLong("store_id"));
+  }
+
+  public List<BigDecimal> comparableSales(String publicId, StoreScope scope) {
+    return jdbc.query(
+        """
+        SELECT peer.sales_7d FROM product_store target
+        JOIN product p ON p.id = target.product_id
+        JOIN store s ON s.id = target.store_id
+        JOIN product other ON other.category_id = p.category_id
+          AND other.unit_of_measure = p.unit_of_measure AND other.active = TRUE
+        JOIN product_store peer ON peer.product_id = other.id AND peer.store_id = s.id
+        WHERE p.erp_id || ':' || s.erp_id = :publicId
+          AND p.active = TRUE AND target.active = TRUE AND peer.active = TRUE
+          AND peer.sales_7d IS NOT NULL AND p.unit_of_measure IS NOT NULL
+        """
+            + StoreScope.SQL,
+        scope.parameters().addValue("publicId", publicId),
+        (row, index) -> row.getBigDecimal("sales_7d"));
+  }
+
+  public boolean claimLogin(UUID loginId, long storeId, StoreScope scope) {
+    jdbc.query(
+        "SELECT id FROM store WHERE id = :storeId FOR NO KEY UPDATE",
+        scope.parameters().addValue("storeId", storeId),
+        (row, index) -> row.getLong(1));
+    return jdbc.update(
+            """
+        INSERT INTO analysis_login_run (actor_id, login_id, store_id)
+        VALUES (:actorId, :loginId, :storeId) ON CONFLICT DO NOTHING
+        """,
+            scope
+                .parameters()
+                .addValue("actorId", scope.actorId())
+                .addValue("loginId", loginId)
+                .addValue("storeId", storeId))
+        > 0;
+  }
+
+  private List<String> readRisks(String json) {
+    try {
+      return objectMapper.readValue(
+          json, objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+    } catch (JacksonException exception) {
+      throw new IllegalStateException("Could not read analysis risks.", exception);
+    }
   }
 
   private String toJson(Object value) {
@@ -190,5 +276,6 @@ public class FlowRepository {
       Integer expirationDays,
       Integer supplierLeadTime,
       String reason,
-      Instant createdAt) {}
+      Instant createdAt,
+      List<String> risks) {}
 }

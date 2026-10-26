@@ -1,6 +1,7 @@
 package com.quistock.ds_backend.model.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 public record ActionListItemDTO(
@@ -12,7 +13,14 @@ public record ActionListItemDTO(
     String justification,
     @JsonProperty("promotion_valid_from") LocalDate promotionValidFrom,
     @JsonProperty("promotion_valid_until") LocalDate promotionValidUntil,
-    @JsonProperty("decision_justification") String decisionJustification) {
+    @JsonProperty("decision_justification") String decisionJustification,
+    Integer quantity,
+    @JsonProperty("desired_order_date") LocalDate desiredOrderDate,
+    @JsonProperty("discount_percentage") BigDecimal discountPercentage,
+    @JsonProperty("reference_sale_price") BigDecimal referenceSalePrice,
+    @JsonProperty("promotional_price") BigDecimal promotionalPrice,
+    @JsonProperty("product_id") String productId,
+    @JsonProperty("store_id") Long storeId) {
   public ActionListItemDTO(
       String id,
       String flowId,
@@ -20,6 +28,22 @@ public record ActionListItemDTO(
       String actionType,
       String status,
       String justification) {
-    this(id, flowId, productName, actionType, status, justification, null, null, null);
+    this(
+        id,
+        flowId,
+        productName,
+        actionType,
+        status,
+        justification,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null);
   }
 }

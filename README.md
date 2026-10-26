@@ -191,3 +191,16 @@ Authorize; cookies da Auth só chegam à Core se o escopo de host/domínio permi
 O Swagger não cria uma rota para expor tokens nem remove a autenticação das APIs.
 Se o gateway remover um prefixo público, alinhe os headers encaminhados e o
 contexto da aplicação para que os URLs gerados pelo Swagger preservem esse prefixo.
+
+## Core contract 3.0.0
+
+See [api-contract.md](api-contract.md) and `/swagger-ui/index.html` for the current contract.
+This version adds self-profile editing, login-triggered sales analysis, explicit current
+analyses, independent inventory risks, human action details and role/status enforcement.
+Web/Mobile must call `POST /flows/analyze-login` once after login (with a retry-stable UUID),
+read `/flows/current`, and connect existing action forms to `/actions/generate`.
+Auth and the AI repository are not modified. Consumers must no longer interpret HIGH/LOW
+as inventory risks. Apply Flyway V7 on existing databases, or use the complete updated
+`database/quistock-schema.sql` for a new empty database; do not execute both bootstrap and
+migration over the same schema. Resynchronize the ERP to populate units before analysis.
+Order completion, receipt, cancellation and automatic promotion closure remain future work.

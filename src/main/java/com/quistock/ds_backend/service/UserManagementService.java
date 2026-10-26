@@ -4,6 +4,7 @@ import com.quistock.ds_backend.model.dto.CreateManagerRequest;
 import com.quistock.ds_backend.model.dto.CreateTeamMemberRequest;
 import com.quistock.ds_backend.model.dto.RegionDTO;
 import com.quistock.ds_backend.model.dto.UpdateManagerRequest;
+import com.quistock.ds_backend.model.dto.UpdateProfileRequest;
 import com.quistock.ds_backend.model.dto.UpdateTeamMemberRequest;
 import com.quistock.ds_backend.model.dto.UserDTO;
 import java.util.List;
@@ -26,6 +27,10 @@ public class UserManagementService {
 
   public UserDTO profile(long actorId) {
     return profileService.profile(actorId);
+  }
+
+  public UserDTO updateProfile(long actorId, UpdateProfileRequest request) {
+    return profileService.updateProfile(actorId, request);
   }
 
   public List<UserDTO> listManagers(long actorId, Long storeId) {

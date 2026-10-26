@@ -2,7 +2,9 @@ package com.quistock.ds_backend.controller;
 
 import com.quistock.ds_backend.model.dto.AnalyzeProductRequest;
 import com.quistock.ds_backend.model.dto.FlowDTO;
+import com.quistock.ds_backend.model.dto.LoginAnalysisRequest;
 import com.quistock.ds_backend.service.FlowService;
+import com.quistock.ds_backend.service.LoginAnalysisService;
 import com.quistock.ds_backend.service.UserAccessGuard;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -41,16 +43,54 @@ import org.springframework.web.bind.annotation.RestController;
 public class FlowController {
   private final FlowService flowService;
   private final UserAccessGuard accessGuard;
+  private final LoginAnalysisService loginAnalysis;
 
-  public FlowController(FlowService service, UserAccessGuard accessGuard) {
+  public FlowController(
+      FlowService service, UserAccessGuard accessGuard, LoginAnalysisService loginAnalysis) {
     this.flowService = service;
     this.accessGuard = accessGuard;
+    this.loginAnalysis = loginAnalysis;
+  }
+
+  @PostMapping("/analyze-login")
+  @Operation(
+      summary = "Analisar após login",
+      description =
+          "Processa lojas autorizadas após login. Reutilize login_id nas tentativas; não chame no refresh.")
+  @ApiResponse(
+      responseCode = "200",
+      description = "Análises atuais, incluindo produtos com dados insuficientes.")
+  @ApiResponse(responseCode = "400", description = "login_id ausente ou UUID inválido.")
+  public List<FlowDTO> analyzeLogin(
+      @Valid @RequestBody LoginAnalysisRequest request,
+      @RequestParam(name = "store_id", required = false) Long storeId,
+      @AuthenticationPrincipal Jwt jwt) {
+    return loginAnalysis.analyzeLogin(
+        request.loginId(),
+        accessGuard.requireStoreScope(Long.parseLong(jwt.getSubject()), storeId));
+  }
+
+  @GetMapping("/current")
+  @Operation(
+      summary = "Consultar análises atuais",
+      description =
+          "Retorna a última análise por produto/loja, inclusive INSUFFICIENT_DATA com flow_type nulo.")
+  @ApiResponse(
+      responseCode = "200",
+      description = "Análises atuais; lista vazia antes do primeiro processamento.")
+  public List<FlowDTO> currentFlows(
+      @RequestParam(name = "product_id", required = false) String productId,
+      @RequestParam(name = "store_id", required = false) Long storeId,
+      @AuthenticationPrincipal Jwt jwt) {
+    return flowService.currentFlows(
+        productId, accessGuard.requireStoreScope(Long.parseLong(jwt.getSubject()), storeId));
   }
 
   @PostMapping("/analyze")
   @Operation(
       summary = "Analisar produto",
-      description = "Gera análise operacional do estoque do produto persistido.")
+      description =
+          "Classifica vendas entre pares e calcula riscos separados; pode indicar dados insuficientes.")
   @ApiResponse(responseCode = "201", description = "Recurso criado.")
   @ApiResponse(
       responseCode = "400",
@@ -89,7 +129,7 @@ public class FlowController {
       parameters = {
         @Parameter(name = "flow_type", description = "HIGH, MEDIUM ou LOW."),
         @Parameter(name = "product_id", description = "ID composto do produto e filial."),
-        @Parameter(name = "status", description = "ANALYZED (único status atual).")
+        @Parameter(name = "status", description = "ANALYZED ou INSUFFICIENT_DATA.")
       })
   @ApiResponse(responseCode = "200", description = "Operação concluída.")
   @ApiResponse(

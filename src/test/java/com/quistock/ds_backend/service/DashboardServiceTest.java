@@ -61,7 +61,7 @@ class DashboardServiceTest {
     assertThat(summary.nearExpiryProducts()).isEqualTo(2);
     assertThat(summary.stockoutProducts()).isEqualTo(1);
     assertThat(summary.overstockProducts()).isEqualTo(1);
-    assertThat(summary.activeActions()).isEqualTo(4);
+    assertThat(summary.activeActions()).isEqualTo(3);
   }
 
   @Test
@@ -86,7 +86,11 @@ class DashboardServiceTest {
         new BigDecimal("9.92"),
         0,
         3,
-        Instant.parse("2026-08-28T12:00:00Z"));
+        Instant.parse("2026-08-28T12:00:00Z"),
+        java.util.List.of(),
+        "SALES_PERCENTILES_V1",
+        true,
+        1L);
   }
 
   private ActionListItemDTO action(String id, String flowId, String actionType, String status) {

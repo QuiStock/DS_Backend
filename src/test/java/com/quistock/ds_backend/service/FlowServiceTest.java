@@ -3,6 +3,7 @@ package com.quistock.ds_backend.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -18,180 +19,155 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 class FlowServiceTest {
-  private static final StoreScope SCOPE = new StoreScope(1001L, null, null);
+  private static final StoreScope SCOPE = new StoreScope(1001L, 1L, null);
   private static final Clock TEST_CLOCK =
-      Clock.fixed(Instant.parse("2026-08-28T12:00:00Z"), ZoneOffset.UTC);
-
-  private ProductService productService;
-  private FlowRepository flowRepository;
-  private FlowService flowService;
+      Clock.fixed(Instant.parse("2026-10-26T12:00:00Z"), ZoneOffset.UTC);
+  private final FlowAnalysisCalculator calculator = new FlowAnalysisCalculator();
+  private ProductService products;
+  private FlowRepository repository;
+  private FlowService service;
 
   @BeforeEach
   void setUp() {
-    productService = mock(ProductService.class);
-    flowRepository = mock(FlowRepository.class);
-    flowService =
-        new FlowService(productService, flowRepository, new FlowAnalysisCalculator(), TEST_CLOCK);
-    when(flowRepository.insertAnalysis(any(), org.mockito.ArgumentMatchers.eq(SCOPE)))
-        .thenReturn(101L);
+    products = mock(ProductService.class);
+    repository = mock(FlowRepository.class);
+    service =
+        new FlowService(
+            products,
+            repository,
+            calculator,
+            TEST_CLOCK,
+            mock(com.quistock.ds_backend.repository.ErpProjectionLock.class));
   }
 
   @Test
-  void shouldClassifyProductCloseToExpirationAsLowAndPersistItsAnalysis() {
-    ProductDTO product = product(51, 58, 36, 150, 0, 3);
-    when(productService.findProductById(product.id(), SCOPE)).thenReturn(product);
-
-    FlowDTO flow = flowService.analyzeProduct(product.id(), SCOPE);
-
-    assertThat(flow.id()).isEqualTo("101");
-    assertThat(flow.flowType()).isEqualTo("LOW");
-    assertThat(flow.status()).isEqualTo("ANALYZED");
-    assertThat(flow.reason()).isEqualTo("Product is expired or close to expiration.");
-    assertThat(flow.dailySalesAverage()).isEqualByComparingTo("5.14");
-    assertThat(flow.stockCoverageDays()).isEqualByComparingTo("9.92");
-    assertThat(flow.analysisDate()).isEqualTo(TEST_CLOCK.instant());
-    verify(flowRepository)
-        .insertAnalysis(
-            new FlowRepository.AnalysisSnapshot(
-                product.id(),
-                "LOW",
-                new BigDecimal("5.14"),
-                new BigDecimal("9.92"),
-                new BigDecimal("51"),
-                new BigDecimal("58"),
-                new BigDecimal("36"),
-                new BigDecimal("150"),
-                0,
-                3,
-                "Product is expired or close to expiration.",
-                TEST_CLOCK.instant()),
-            SCOPE);
+  void shouldClassifySalesIndependentlyFromInventoryRisk() {
+    var peers =
+        List.of(
+            BigDecimal.ZERO,
+            BigDecimal.ONE,
+            BigDecimal.TEN,
+            new BigDecimal("20"),
+            new BigDecimal("30"));
+    assertThat(calculator.calculate(product(30, 100, 3), peers).flowType()).isEqualTo("HIGH");
+    assertThat(calculator.calculate(product(10, 100, 3), peers).flowType()).isEqualTo("MEDIUM");
+    assertThat(calculator.calculate(product(0, 100, 3), peers).flowType()).isEqualTo("LOW");
+    assertThat(calculator.calculate(product(30, 100, 3), peers).risks())
+        .contains("NEAR_EXPIRY", "EXPIRATION");
   }
 
   @Test
-  void shouldClassifyProductWithStockoutRiskAsHigh() {
-    ProductDTO product = product(5, 40, 14, 60, 30, 5);
-    when(productService.findProductById(product.id(), SCOPE)).thenReturn(product);
-
-    FlowDTO flow = flowService.analyzeProduct(product.id(), SCOPE);
-
-    assertThat(flow.flowType()).isEqualTo("HIGH");
-    assertThat(flow.stockCoverageDays()).isEqualByComparingTo("2.50");
+  void shouldKeepPercentileBoundariesInMedium() {
+    var peers =
+        List.of(
+            BigDecimal.ONE,
+            new BigDecimal("2"),
+            new BigDecimal("3"),
+            new BigDecimal("4"),
+            new BigDecimal("5"));
+    assertThat(calculator.calculate(product(2, 100, 30), peers).flowType()).isEqualTo("MEDIUM");
+    assertThat(calculator.calculate(product(4, 100, 30), peers).flowType()).isEqualTo("MEDIUM");
+    assertThat(calculator.calculate(product(1, 100, 30), peers).flowType()).isEqualTo("LOW");
   }
 
   @Test
-  void shouldClassifyAdequateProductAsMedium() {
-    ProductDTO product = product(100, 40, 14, 60, 365, 5);
-    when(productService.findProductById(product.id(), SCOPE)).thenReturn(product);
-
-    FlowDTO flow = flowService.analyzeProduct(product.id(), SCOPE);
-
-    assertThat(flow.flowType()).isEqualTo("MEDIUM");
-    assertThat(flow.reason()).isEqualTo("Stock is adequate for current demand.");
+  void shouldRequireEnoughComparableDataAndNeverTreatMissingSalesAsZero() {
+    assertThat(calculator.calculate(product(0, 100, 30), List.of(BigDecimal.ZERO)).flowType())
+        .isNull();
+    var peers = java.util.Collections.nCopies(5, BigDecimal.TEN);
+    assertThat(calculator.calculate(product(null, 100, 30), peers).flowType()).isNull();
+    assertThat(calculator.calculate(product(null, 100, 30), peers).dailySalesAverage()).isNull();
+    assertThat(calculator.calculate(product(10, 100, 30), peers).flowType()).isEqualTo("MEDIUM");
   }
 
   @Test
-  void shouldUseThirtyDayAverageWhenThereAreNoWeeklySales() {
-    ProductDTO product = product(100, 40, 0, 60, null, 5);
-    when(productService.findProductById(product.id(), SCOPE)).thenReturn(product);
-
-    FlowDTO flow = flowService.analyzeProduct(product.id(), SCOPE);
-
-    assertThat(flow.dailySalesAverage()).isEqualByComparingTo("2.00");
-    assertThat(flow.stockCoverageDays()).isEqualByComparingTo("50.00");
+  void shouldSeparateExpiredNearExpiryAndStockout() {
+    var peers = java.util.Collections.nCopies(5, BigDecimal.TEN);
+    assertThat(calculator.calculate(product(10, 0, 3), peers).risks()).containsExactly("STOCKOUT");
+    assertThat(calculator.calculate(product(10, 100, -1), peers).risks())
+        .containsExactly("EXPIRED");
+    assertThat(calculator.calculate(product(0, 100, 7), peers).risks())
+        .contains("EXPIRATION", "NEAR_EXPIRY");
+    assertThat(calculator.calculate(product(0, 100, 8), peers).risks())
+        .doesNotContain("NEAR_EXPIRY");
+    assertThat(calculator.calculate(product(10, 100, null), peers).risks()).isEmpty();
   }
 
   @Test
-  void shouldClassifyStockWithoutSalesAsLow() {
-    ProductDTO product = product(100, 40, 0, 0, null, 5);
-    when(productService.findProductById(product.id(), SCOPE)).thenReturn(product);
-
-    FlowDTO flow = flowService.analyzeProduct(product.id(), SCOPE);
-
-    assertThat(flow.flowType()).isEqualTo("LOW");
-    assertThat(flow.stockCoverageDays()).isEqualByComparingTo("0.00");
+  void shouldPersistNewAnalysisAndReadItsServerMetadata() {
+    var product = product(10, 100, 20);
+    when(products.findProductById(product.id(), SCOPE)).thenReturn(product);
+    when(repository.comparableSales(product.id(), SCOPE))
+        .thenReturn(java.util.Collections.nCopies(5, BigDecimal.TEN));
+    when(repository.insertAnalysis(any(), eq(SCOPE))).thenReturn(101L);
+    when(repository.findById("101", SCOPE)).thenReturn(Optional.of(flow()));
+    assertThat(service.analyzeProduct(product.id(), SCOPE)).isEqualTo(flow());
+    var captor = ArgumentCaptor.forClass(FlowRepository.AnalysisSnapshot.class);
+    verify(repository).insertAnalysis(captor.capture(), eq(SCOPE));
+    assertThat(captor.getValue().flowType()).isEqualTo("MEDIUM");
+    assertThat(captor.getValue().createdAt()).isEqualTo(TEST_CLOCK.instant());
   }
 
   @Test
-  void shouldReportMissingProductWhenTheSnapshotDoesNotContainIt() {
-    ProductDTO product = product(100, 40, 14, 60, 30, 5);
-    when(productService.findProductById(product.id(), SCOPE)).thenReturn(product);
-    when(flowRepository.insertAnalysis(any(), org.mockito.ArgumentMatchers.eq(SCOPE)))
-        .thenReturn(-1L);
-
-    assertThatThrownBy(() -> flowService.analyzeProduct(product.id(), SCOPE))
+  void shouldRejectMissingProduct() {
+    when(products.findProductById("missing", SCOPE))
+        .thenThrow(new ProductNotFoundException("missing"));
+    assertThatThrownBy(() -> service.analyzeProduct("missing", SCOPE))
         .isInstanceOf(ProductNotFoundException.class);
   }
 
   @Test
-  void shouldPassFlowFiltersToTheRepository() {
-    when(flowRepository.findAll("LOW", "PROD001:FIL001", "ANALYZED", SCOPE))
-        .thenReturn(List.of(flow()));
-
-    assertThat(flowService.listFlows("LOW", "PROD001:FIL001", "ANALYZED", SCOPE))
-        .containsExactly(flow());
-  }
-
-  @Test
-  void shouldPassNoFiltersToTheRepository() {
-    when(flowRepository.findAll(null, null, null, SCOPE)).thenReturn(List.of(flow()));
-
-    assertThat(flowService.listFlows(SCOPE)).containsExactly(flow());
-  }
-
-  @Test
-  void shouldRejectUnsupportedFlowTypeFilter() {
-    assertThatThrownBy(() -> flowService.listFlows("URGENT", null, null, SCOPE))
+  void shouldKeepHistoryAndFilterCurrentOnTheServer() {
+    when(repository.findAll(null, null, null, SCOPE)).thenReturn(List.of(flow()));
+    assertThat(service.listFlows(SCOPE)).containsExactly(flow());
+    assertThat(service.currentFlows(null, SCOPE)).containsExactly(flow());
+    assertThatThrownBy(() -> service.listFlows("invalid", null, null, SCOPE))
+        .isInstanceOf(InvalidRequestException.class);
+    assertThatThrownBy(() -> service.listFlows(null, null, "invalid", SCOPE))
         .isInstanceOf(InvalidRequestException.class);
   }
 
-  @Test
-  void shouldRejectUnsupportedFlowStatusFilter() {
-    assertThatThrownBy(() -> flowService.listFlows(null, null, "PENDING", SCOPE))
-        .isInstanceOf(InvalidRequestException.class);
-  }
-
-  private ProductDTO product(
-      Integer currentStock,
-      Integer minimumStock,
-      Integer sales7d,
-      Integer sales30d,
-      Integer expirationDays,
-      Integer leadTime) {
+  private ProductDTO product(Integer sales, Integer stock, Integer expiration) {
     return new ProductDTO(
         "PROD001:FIL001",
         "PROD001",
-        "Whole Milk 1L",
+        "Milk",
         "Dairy",
-        currentStock,
-        minimumStock,
-        sales7d,
-        sales30d,
-        expirationDays,
-        leadTime,
-        new BigDecimal("7.99"),
-        new BigDecimal("5.20"),
-        Instant.parse("2026-08-20T00:00:00Z"),
+        stock,
+        5,
+        sales,
+        30,
+        expiration,
+        2,
+        BigDecimal.TEN,
+        BigDecimal.ONE,
+        TEST_CLOCK.instant(),
         true,
-        "Santana Store");
+        "Store");
   }
 
   private FlowDTO flow() {
     return new FlowDTO(
         "101",
         "PROD001:FIL001",
-        "Whole Milk 1L",
-        "LOW",
+        "Milk",
+        "MEDIUM",
         "ANALYZED",
-        "analysis reason",
+        "reason",
         BigDecimal.ONE,
         BigDecimal.TEN,
-        0,
-        3,
-        TEST_CLOCK.instant());
+        20,
+        2,
+        TEST_CLOCK.instant(),
+        List.of(),
+        "SALES_PERCENTILES_V1",
+        true,
+        1L);
   }
 }

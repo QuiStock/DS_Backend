@@ -196,6 +196,7 @@ CREATE TABLE "product" (
   "erp_id" VARCHAR(150) UNIQUE NOT NULL,
   "sku" VARCHAR(100) UNIQUE NOT NULL,
   "category_id" BIGINT,
+  "unit_of_measure" VARCHAR(80),
   "name" VARCHAR(200) NOT NULL,
   "sale_price" NUMERIC(12,2) NOT NULL,
   "minimum_stock_quantity" NUMERIC(14,3),
@@ -241,8 +242,8 @@ CREATE TABLE "product_store" (
   "store_id" BIGINT NOT NULL,
   "minimum_stock_quantity" NUMERIC(14,3),
   "supplier_lead_time_days" INT,
-  "sales_7d" NUMERIC(14,3) NOT NULL DEFAULT 0,
-  "sales_30d" NUMERIC(14,3) NOT NULL DEFAULT 0,
+  "sales_7d" NUMERIC(14,3),
+  "sales_30d" NUMERIC(14,3),
   "sale_price" NUMERIC(12,2) NOT NULL,
   "unit_cost" NUMERIC(12,2) NOT NULL,
   "last_restock_at" TIMESTAMPTZ,
@@ -326,7 +327,7 @@ CREATE TABLE "product_analysis" (
   "ml_execution_id" BIGINT,
   "store_id" BIGINT NOT NULL,
   "product_id" BIGINT NOT NULL,
-  "flow_type_id" BIGINT NOT NULL,
+  "flow_type_id" BIGINT,
   "metrics" JSONB NOT NULL,
   "context" JSONB,
   "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -344,6 +345,7 @@ CREATE TABLE "suggestion" (
   "current_batch_count" INT,
   "ml_discount_percentage" NUMERIC(5,2),
   "current_discount_percentage" NUMERIC(5,2),
+  "desired_order_date" DATE,
   "promotion_valid_from" DATE,
   "promotion_valid_until" DATE,
   "reference_sale_price" NUMERIC(12,2),
@@ -623,7 +625,7 @@ CREATE UNIQUE INDEX "uq_product_analysis_execution_store_product"
   ON "product_analysis" ("ml_execution_id", "store_id", "product_id");
 
 CREATE UNIQUE INDEX "uq_suggestion_product_analysis"
-  ON "suggestion" ("product_analysis_id")
+  ON "suggestion" ("product_analysis_id", "type")
   WHERE "product_analysis_id" IS NOT NULL;
 
 CREATE INDEX "idx_suggestion_log_suggestion_occurred"
@@ -830,3 +832,15 @@ INSERT INTO "role" ("code", "name") VALUES
   ('REGIONAL_MANAGER', 'REGIONAL_MANAGER'),
   ('EMPLOYEE', 'EMPLOYEE')
 ON CONFLICT ("code") DO NOTHING;
+
+-- Login-triggered analyses are retried using the same UUID for each successful login.
+CREATE TABLE analysis_login_run (
+  actor_id BIGINT NOT NULL REFERENCES user_account(id),
+  login_id UUID NOT NULL,
+  store_id BIGINT NOT NULL REFERENCES store(id),
+  completed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (actor_id, login_id, store_id)
+);
+CREATE INDEX ix_suggestion_pending_product_store_type
+  ON suggestion (store_id, product_id, type)
+  WHERE status IN ('GENERATED', 'IN_EMPLOYEE_TRIAGE', 'SENT_TO_MANAGER');

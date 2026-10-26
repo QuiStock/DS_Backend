@@ -1,7 +1,38 @@
 # QuiStock API Contract
 
-Version: 2.1.0
-Last updated: 2026-10-20
+Version: 3.0.0
+Last updated: 2026-10-26
+
+## Version 3 migration notes
+
+This is a breaking business-contract change: HIGH/MEDIUM/LOW now describe sales speed,
+not inventory risk. Use `risks` for alerts and action selection. The ML remains advisory;
+no route executes an order or promotion in the ERP.
+
+- After each successful login, Web/Mobile must call `POST /flows/analyze-login` with a new
+  `login_id` UUID. Reuse that UUID for retries; do not call it on token refresh.
+- Fetch `GET /flows/current` instead of choosing a historical analysis in the client.
+- An insufficient sample produces `status=INSUFFICIENT_DATA` and `flow_type=null`.
+- Employee action forms must send quantity/date or discount/period. HIGH alone does not
+  authorize or suggest an order; LOW alone does not imply expiration.
+- Existing lot consolidation, composite product IDs and fractional stock remain unchanged.
+- Auth login, JWT claims, cookies and session endpoints remain unchanged.
+
+## Web/Mobile integration checklist
+
+1. Keep the existing Auth login/session flow. After login and profile loading, generate
+   a UUID and call `/flows/analyze-login`; refresh must not trigger this request.
+2. Load `/products` and `/flows/current` with the authorized `store_id`; join using the
+   exact composite product ID. Handle null flow_type/INSUFFICIENT_DATA explicitly.
+3. Use `risks` and current product expiration_days for alerts. Do not interpret HIGH as
+   stockout, or LOW as an automatic promotion. Both classifications describe sales speed.
+4. Employee submission calls `/actions/generate` with the existing form fields, then
+   `PATCH /actions/{id}/status` with SENT_TO_MANAGER. Confirm submission only after both
+   succeed. If forwarding fails, retain the generated action and retry forwarding.
+5. Manager pages query `/actions?status=SENT_TO_MANAGER` and approve/reject through the
+   status route. Regional managers only read operational actions.
+6. Profile save calls `PATCH /profile` with name and/or an already hosted photo URL.
+   This release adds no image upload endpoint or storage provider.
 
 ## Base URL
 
@@ -165,6 +196,23 @@ Response 200:
 
 An inactive or missing account returns `403 Forbidden`.
 
+## 0.1.1 Edit the current profile
+
+`PATCH /profile` updates only the active account identified by the JWT `sub`.
+
+```json
+{"name":"Ana Silva","profile_photo_url":"https://images.example.com/ana.jpg"}
+```
+
+Returns `200` with the updated `UserDTO`, in the same shape as `GET /profile`.
+Name must be nonblank and at most 150 characters. Photo URL must be an absolute HTTPS URL
+without embedded credentials, at most 500 characters. An empty photo URL removes the photo
+(the response then contains null); omitted or null fields remain unchanged.
+At least one nonnull field is required. Unknown fields, including email, password, role,
+status and store/region assignments, are rejected with `400`. The API saves the URL only;
+it neither downloads nor uploads images. Changes are recorded in `audit_event`.
+Cookie authentication requires Core CSRF; Bearer-only requests do not.
+
 ## 0.2 List regions
 
 Method: `GET /regions`
@@ -312,8 +360,8 @@ Transformation rules:
 - `category` receives `categoria`.
 - `branch` receives `filial`.
 - `current_stock` is the decimal sum of `quantidade` for active batches in the saved snapshot.
-- `sales_7d` is the decimal sum of `vendas_7d` for all batches in the group.
-- `sales_30d` is the decimal sum of `vendas_30d` for all batches in the group.
+- `sales_7d` is the decimal sum of `vendas_7d` for all batches in the group; null if any contributing batch has unknown sales.
+- `sales_30d` follows the same rule for `vendas_30d`; missing sales are not zero.
 - `expiration_days` is calculated using the nearest expiration date among batches with
   quantity greater than zero.
 - `minimum_stock` is not summed. If batches disagree, the highest valid value is saved for
@@ -404,256 +452,185 @@ Response 200:
 
 # 2. Flows
 
-A flow is the product classification produced by an analysis.
+## Sales classification and separate risks
 
-Possible types:
+Classification is calculated per consolidated product/store using `sales_7d / 7`, without
+rounding stock or requiring historical daily sales. The peer group consists of active
+products in the same store, SQL category and normalized ERP unit of measure, with known
+`sales_7d`. It includes the analyzed product. The ERP `unidade_medida` is now persisted in
+`product.unit_of_measure`; legacy rows without a unit need a successful ERP synchronization.
 
-- `HIGH`: the product is at risk of stockout.
-- `MEDIUM`: the stock level is adequate.
-- `LOW`: the product may remain in excess or expire.
+A minimum of five comparable products and known sales are required. Otherwise, the analysis
+is saved as `INSUFFICIENT_DATA`, with null `flow_type`; no action may be generated from it.
+Unknown sales are not zero. With enough peers:
 
-## Classification
+- Zero sales: LOW.
+- Sales below the 25th percentile: LOW.
+- Sales above the 75th percentile: HIGH.
+- Values between or equal to those boundaries: MEDIUM.
+- Equal positive sales across the group: MEDIUM.
 
-In the MVP, a simple backend classifier determines `HIGH`, `MEDIUM`, or `LOW` using:
+Percentiles use linear interpolation at `(n - 1) * percentile` over sorted sales. Daily
+average and coverage are represented with six decimal places. Coverage is null for zero
+or unknown sales because no finite sell-through time is established.
 
-- `current_stock`
-- `sales_7d`
-- `sales_30d`
-- `expiration_days`
-- `supplier_lead_time`
+`risks` is independent of `flow_type` and can contain multiple values:
 
-The architecture allows this logic to be replaced by a trained machine-learning model in
-the future.
+| Risk | Rule |
+| --- | --- |
+| STOCKOUT | Stock <= 0, below a known minimum, or known coverage <= known lead time. |
+| NEAR_EXPIRY | Positive stock and expiration_days between 0 and 7 inclusive. |
+| EXPIRATION | Positive stock, nonnegative known expiry and zero known sales, or coverage >= expiration_days. |
+| EXPIRED | Positive stock and negative expiration_days. |
 
----
+Missing input does not establish a risk that depends on that input. Expired products cannot
+produce a promotion. These are transparent advisory rules, not a trained ML model.
 
 ## 2.1 Analyze a product
 
-Method:
-
-`POST /flows/analyze`
-
-Body:
+`POST /flows/analyze` with `{"product_id":"PROD001:FIL001"}` returns `201` and a persisted
+analysis. Peers are always read from the authorized store, even when the UI selected only
+one product. Unauthorized/missing products return `404`.
 
 ```json
 {
-  "product_id": "PROD001:FIL001"
+  "id":"101", "product_id":"PROD001:FIL001", "product_name":"Whole Milk 1L",
+  "flow_type":"HIGH", "status":"ANALYZED",
+  "reason":"Sales speed compared with the same category, unit and store.",
+  "daily_sales_average":20.000000, "stock_coverage_days":2.500000,
+  "expiration_days":10, "supplier_lead_time":3,
+  "analysis_date":"2026-10-26T12:00:00Z", "risks":["STOCKOUT"],
+  "classifier":"SALES_PERCENTILES_V1", "is_current":true, "store_id":17
 }
 ```
 
-Response 201:
+## 2.2 Analyze after login
+
+`POST /flows/analyze-login?store_id=17`
 
 ```json
-{
-  "id": "101",
-  "product_id": "PROD001:FIL001",
-  "product_name": "Whole Milk 1L",
-  "flow_type": "LOW",
-  "status": "ANALYZED",
-  "reason": "Product is expired or close to expiration.",
-  "daily_sales_average": 5.14,
-  "stock_coverage_days": 9.92,
-  "expiration_days": 0,
-  "supplier_lead_time": 3,
-  "analysis_date": "2026-07-30T11:47:00-03:00"
-}
+{"login_id":"eb1b9a34-9d93-4dd0-ae91-e06d93f9ddbd"}
 ```
 
----
+Returns `200` with the current analyses for the permitted scope. `store_id` is optional;
+without it all authorized active stores are processed. The client generates one UUID after
+successful login and reuses it on retries. Refreshing an access token does not trigger
+analysis. Auth does not call Core automatically; Web/Mobile must wire this request.
 
-## 2.2 List analyzed flows
+Processing is transactional, with a 120-second transaction timeout. Analysis shares the ERP
+projection writer lock to avoid mixing data during synchronization. Stores are locked in
+stable ID order; repeated `(actor_id, login_id, store_id)` is not processed again. A failure
+rolls back both analyses and the retry marker. Concurrent different logins are serialized
+for overlapping stores. No periodic scheduler is enabled. A malformed/missing UUID returns
+`400`; an explicitly unauthorized store returns `403`.
 
-Method:
+## 2.3 Current analyses and history
 
-`GET /flows`
+- `GET /flows/current?store_id=17&product_id=PROD001:FIL001` returns at most one latest
+  analysis per product/store, including insufficient-data results.
+- `GET /flows` keeps the full history. Optional filters: `store_id`, `product_id`,
+  `flow_type=HIGH|MEDIUM|LOW`, `status=ANALYZED|INSUFFICIENT_DATA`.
 
-Response 200:
+Current selection happens on the server, by processing timestamp and ID as a deterministic
+tie breaker. A newer insufficient-data analysis supersedes a previous successful one.
+Legacy `RULE_ENGINE` analyses stay in history with `is_current=false`; their older HIGH/LOW
+meaning is not converted. Empty current results mean no analysis under the new classifier.
 
-```json
-[
-  {
-    "id": "101",
-    "product_id": "PROD001:FIL001",
-    "product_name": "Whole Milk 1L",
-    "flow_type": "LOW",
-    "status": "ANALYZED",
-    "reason": "Product is expired or close to expiration."
-  }
-]
-```
+Current means latest processing, not continuous freshness: data/metrics are snapshots, and
+ERP updates or the passage of time do not automatically recalculate them. Use current
+`GET /products.expiration_days` for display. If login processing fails, clients must show
+that analysis could not be updated rather than claim an older result was refreshed.
 
-### Optional filters
-
-```text
-GET /flows?flow_type=LOW
-GET /flows?product_id=PROD001:FIL001
-GET /flows?status=ANALYZED
-```
-
-Available parameters:
-
-- `store_id`: positive SQL ID of one permitted active store.
-- `flow_type`: `HIGH`, `MEDIUM`, or `LOW`.
-- `product_id`: filters flows for one product.
-- `status`: `ANALYZED` in the MVP; filters by analysis status.
-
----
+Business dates use `America/Sao_Paulo`; analysis timestamps are UTC instants. ERP timestamps
+continue to be converted to calendar dates using the existing UTC import behavior.
+Lot consolidation can still hide valid stock when the nearest positive-balance batch has
+already expired. Responses are unpaginated; there is no cross-request snapshot version.
 
 # 3. Actions
 
-An action is the recommendation generated from a flow.
+Actions are human requests persisted as `suggestion`, never automatic ERP execution.
+`GET /actions` is available within the account's store scope. Regional managers monitor;
+they cannot create, forward, approve or reject actions. No change to Auth is needed.
 
-Possible types:
+## 3.1 Create an action from a current analysis
 
-- `PROMOTION`
-- `ORDER`
+`POST /actions/generate` is restricted to EMPLOYEE and returns `201`.
 
-PostgreSQL also reserves `MONITOR` for the future ML flow. The current rule-based action
-generation does not create `MONITOR` actions.
-
-Possible statuses:
-
-- `GENERATED`
-- `IN_EMPLOYEE_TRIAGE`
-- `SENT_TO_MANAGER`
-- `APPROVED`
-- `REJECTED`
-
-Generation rules:
-
-- `HIGH` flow generates `ORDER`.
-- `MEDIUM` flow does not generate a suggestion; its stock level is adequate.
-- `LOW` flow generates `PROMOTION`.
-
-The type and status values match the PostgreSQL enums. A generated action starts with
-`GENERATED`. Employee triage and manager decisions use the other statuses above.
-
----
-
-## 3.1 Generate actions for a flow
-
-Method:
-
-`POST /actions/generate`
-
-Body:
+Order form:
 
 ```json
-{
-  "flow_id": "101",
-  "promotion_valid_from": "2026-10-01",
-  "promotion_valid_until": "2026-10-07"
-}
+{"flow_id":"101","action_type":"ORDER","quantity":20,"desired_order_date":"2026-11-05"}
 ```
 
-`promotion_valid_from` and `promotion_valid_until` are required when the flow is `LOW` and
-therefore generates a promotion. The end date must be on or after the start date. Do not send
-these fields for an `ORDER`.
-
-Response 201:
+Promotion form, using the existing mobile duration field:
 
 ```json
-{
-  "flow_id": "101",
-  "generated_actions": [
-    {
-      "id": "501",
-      "action_type": "PROMOTION",
-      "status": "GENERATED",
-      "justification": "Expiration or excess-stock risk: create a promotion.",
-      "promotion_valid_from": "2026-10-01",
-      "promotion_valid_until": "2026-10-07"
-    }
-  ]
-}
+{"flow_id":"102","action_type":"PROMOTION","discount_percentage":15,"promotion_duration_days":7}
 ```
 
----
+Alternatively send both `promotion_valid_from` and `promotion_valid_until` instead of
+`promotion_duration_days`. Duration starts on the business date of the request and is
+inclusive: one day means start=end=today. Do not combine duration and explicit dates.
 
-## 3.2 List actions
+- ORDER requires a positive integer quantity and desired date >= today, with no promotion
+  fields. The date is requested by the user and is not a delivery guarantee.
+- PROMOTION requires discount from 0 to 100 inclusive and a complete valid period, starting
+  today or later. No quantity/order-date fields are accepted. Duration is 1..36500 days.
+- ORDER is compatible with STOCKOUT; PROMOTION with NEAR_EXPIRY or EXPIRATION, provided
+  EXPIRED is absent. Classification alone never determines the action type.
+- `action_type` may be omitted only when there is one compatible type. Both types require
+  explicit selection; no risk with no action fields returns `generated_actions: []`.
+- Insufficient, superseded or legacy analyses return `409`. Invalid fields/type return `400`.
 
-Method:
+The response retains `flow_id` and `generated_actions`. Each action includes:
+`id`, `action_type`, `status`, `justification`, `promotion_valid_from`,
+`promotion_valid_until`, `quantity`, `desired_order_date`, `discount_percentage`,
+`reference_sale_price`, `promotional_price`, `product_id` and SQL `store_id`.
+Fields not applicable to the type are null. Promotional price uses the current persisted
+sale price and human discount, rounded to two decimals. Submitted human values are stored
+in `current_*`; ML fields remain untouched.
 
-`GET /actions`
+## 3.2 List and identify actions
 
-Response 200:
+`GET /actions` supports optional `status`, `action_type=ORDER|PROMOTION`, `flow_id`, `store_id`.
+Responses add `flow_id`, `product_name` and `decision_justification` to the action details.
+Use composite `product_id` and SQL `store_id` to associate actions; do not join by name.
 
-```json
-[
-  {
-    "id": "501",
-    "flow_id": "101",
-    "product_name": "Whole Milk 1L",
-    "action_type": "PROMOTION",
-    "status": "GENERATED",
-    "justification": "Expiration or excess-stock risk: create a promotion.",
-    "promotion_valid_from": "2026-10-01",
-    "promotion_valid_until": "2026-10-07",
-    "decision_justification": null
-  }
-]
-```
+## 3.3 Workflow and decisions
 
-### Optional filters
+`PATCH /actions/{id}/status`, with a body such as `{"status":"SENT_TO_MANAGER"}`.
 
-```text
-GET /actions?status=GENERATED
-GET /actions?action_type=PROMOTION
-GET /actions?flow_id=101
-```
+| Actor | Allowed transition |
+| --- | --- |
+| EMPLOYEE | GENERATED -> IN_EMPLOYEE_TRIAGE |
+| EMPLOYEE | GENERATED or IN_EMPLOYEE_TRIAGE -> SENT_TO_MANAGER |
+| MANAGER | SENT_TO_MANAGER -> APPROVED or REJECTED |
 
-Available parameters:
+REJECTED requires nonblank `justification`. Repeated same status without extra fields is
+idempotent for non-rejection requests; REJECTED still requires justification and a repeated decision returns 409; trying to change decision details or reverse a final status returns `409`.
+Role violations return `403`; unknown/out-of-scope action IDs return `404`. Cookie writes
+require `X-XSRF-TOKEN` from Core `/csrf` plus its cookie, as for other mutations.
+Existing paired `final_promotion_valid_from`/`final_promotion_valid_until` approval fields
+remain available to managers; new mobile editing controls are not required for this release.
+The API records employee triage, manager decision and audit history. Approval copies human
+quantity/discount/price to the decision record. No ERP order or promotion is executed.
 
-- `status`: `GENERATED`, `IN_EMPLOYEE_TRIAGE`, `SENT_TO_MANAGER`, `APPROVED`, or `REJECTED`.
-- `store_id`: positive SQL ID of one permitted active store.
-- `action_type`: `PROMOTION` or `ORDER`.
-- `flow_id`: filters actions generated from one flow.
+## 3.4 Duplicate prevention and release scope
 
----
+Pending means GENERATED, IN_EMPLOYEE_TRIAGE or SENT_TO_MANAGER. Another pending action of
+the same type/product/store from a different analysis returns `409`. Product/store locking
+makes this check safe for concurrent API creations. Existing duplicate rows are retained
+as historical data; the migration does not delete or change decisions.
 
-## 3.3 Update an action status
+A valid repeat of the same analysis/type returns its existing action with `201` and does
+not edit values. Approved/rejected actions release the pending-action block; a new analysis
+can then create another action. The same analysis/type remains one persisted action.
+One analysis can support both ORDER and PROMOTION when both risks exist.
 
-Method:
-
-`PATCH /actions/{id}/status`
-
-Example:
-
-`PATCH /actions/501/status`
-
-Body:
-
-```json
-{
-  "status": "APPROVED",
-  "final_promotion_valid_from": "2026-10-02",
-  "final_promotion_valid_until": "2026-10-08"
-}
-```
-
-Final promotion dates are optional and may be sent when approving a promotion. Send both or
-neither; the end date must be on or after the start date. A rejection must include a non-empty
-`justification`:
-
-```json
-{
-  "status": "REJECTED",
-  "justification": "The store cannot run a promotion this week."
-}
-```
-
-Response 200:
-
-```json
-{
-  "id": "501",
-  "status": "APPROVED",
-  "promotion_valid_from": "2026-10-02",
-  "promotion_valid_until": "2026-10-08"
-}
-```
-
----
+Future work: order completion/receipt, cancellation, and automatic promotion closure.
+There are no COMPLETED/CANCELLED/EXPIRED action statuses in this release. APPROVED is a
+human decision only; approving another order can therefore coexist with an older approved
+order. MONITOR remains reserved in SQL and is not generated by these routes.
 
 # 4. AI chat
 
@@ -754,6 +731,11 @@ for branches not yet assigned to a region; such branches are not returned to reg
 Dashboard metrics are calculated from analyzed products, generated flows, and suggested
 actions.
 
+The retained names `high_risk_products`, `medium_risk_products` and `low_risk_products`
+count current, classified products in the corresponding sales-flow category in version 3.
+They are legacy field names, not risk severity levels. Use analysis `risks` for inventory alerts.
+Insufficient-data and legacy analyses are excluded from these classification counts.
+
 ## 6.1 Get the dashboard summary
 
 Method:
@@ -791,8 +773,7 @@ by individual ERP batch.
   limit, with a default of 30 days.
 - `stockout_products`: consolidated stock less than or equal to zero.
 - `overstock_products`: consolidated stock greater than minimum stock.
-- `active_actions`: actions with `GENERATED`, `IN_EMPLOYEE_TRIAGE`, `SENT_TO_MANAGER`, or
-  `APPROVED` status.
+- `active_actions`: actions with `GENERATED`, `IN_EMPLOYEE_TRIAGE`, or `SENT_TO_MANAGER` status.
 
 The expiration threshold can be configured with `dashboard.short-expiry-days` or the
 `DASHBOARD_SHORT_EXPIRY_DAYS` environment variable.

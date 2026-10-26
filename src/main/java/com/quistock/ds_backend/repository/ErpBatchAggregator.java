@@ -5,17 +5,19 @@ import com.quistock.ds_backend.util.ErpValueParser;
 import java.math.BigDecimal;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Function;
 
 final class ErpBatchAggregator {
   private ErpBatchAggregator() {}
 
   static BigDecimal sum(List<ErpBatchDTO> batches, Function<ErpBatchDTO, Object> field) {
-    return batches.stream()
-        .map(field)
-        .map(ErpValueParser::toBigDecimal)
-        .filter(value -> value != null)
-        .reduce(BigDecimal.ZERO, BigDecimal::add);
+    List<BigDecimal> values =
+        batches.stream().map(field).map(ErpValueParser::toBigDecimal).toList();
+    if (values.isEmpty() || values.stream().anyMatch(Objects::isNull)) {
+      return null;
+    }
+    return values.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
   }
 
   static BigDecimal maximumDecimal(List<ErpBatchDTO> batches, Function<ErpBatchDTO, Object> field) {
@@ -42,7 +44,7 @@ final class ErpBatchAggregator {
             Comparator.comparing(
                     (ErpBatchDTO batch) -> instant(batch.entryDate()),
                     Comparator.nullsFirst(Comparator.naturalOrder()))
-                .thenComparing(batch -> java.util.Objects.toString(batch.id(), "")))
+                .thenComparing(batch -> Objects.toString(batch.id(), "")))
         .orElseThrow();
   }
 

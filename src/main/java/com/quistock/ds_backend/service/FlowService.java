@@ -5,6 +5,7 @@ import com.quistock.ds_backend.exception.InvalidRequestException;
 import com.quistock.ds_backend.exception.ProductNotFoundException;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.ProductDTO;
+import com.quistock.ds_backend.repository.ErpProjectionLock;
 import com.quistock.ds_backend.repository.FlowRepository;
 import com.quistock.ds_backend.repository.StoreScope;
 import java.time.Clock;
@@ -12,12 +13,13 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class FlowService {
   private static final Set<String> VALID_FLOW_TYPES = Set.of("HIGH", "MEDIUM", "LOW");
-  private static final Set<String> VALID_STATUSES = Set.of("ANALYZED");
-
+  private static final Set<String> VALID_STATUSES = Set.of("ANALYZED", "INSUFFICIENT_DATA");
+  private final ErpProjectionLock projectionLock;
   private final ProductService productService;
   private final FlowRepository flowRepository;
   private final FlowAnalysisCalculator analysisCalculator;
@@ -27,18 +29,25 @@ public class FlowService {
       ProductService productService,
       FlowRepository flowRepository,
       FlowAnalysisCalculator analysisCalculator,
-      Clock clock) {
+      Clock clock,
+      ErpProjectionLock projectionLock) {
+    this.projectionLock = projectionLock;
     this.productService = productService;
     this.flowRepository = flowRepository;
     this.analysisCalculator = analysisCalculator;
     this.clock = clock;
   }
 
+  @Transactional
   public FlowDTO analyzeProduct(String productId, StoreScope scope) {
-    ProductDTO product = productService.findProductById(productId, scope);
-    FlowAnalysisCalculator.Result calculation = analysisCalculator.calculate(product);
-    Instant analysisDate = Instant.now(clock);
-    FlowRepository.AnalysisSnapshot snapshot =
+    projectionLock.acquire();
+    return analyze(productService.findProductById(productId, scope), scope);
+  }
+
+  public FlowDTO analyze(ProductDTO product, StoreScope scope) {
+    var calculation =
+        analysisCalculator.calculate(product, flowRepository.comparableSales(product.id(), scope));
+    var snapshot =
         new FlowRepository.AnalysisSnapshot(
             product.id(),
             calculation.flowType(),
@@ -51,23 +60,13 @@ public class FlowService {
             product.expirationDays(),
             product.supplierLeadTime(),
             calculation.reason(),
-            analysisDate);
+            Instant.now(clock),
+            calculation.risks());
     long id = flowRepository.insertAnalysis(snapshot, scope);
     if (id < 0) {
-      throw new ProductNotFoundException(productId);
+      throw new ProductNotFoundException(product.id());
     }
-    return new FlowDTO(
-        Long.toString(id),
-        product.id(),
-        product.name(),
-        calculation.flowType(),
-        "ANALYZED",
-        calculation.reason(),
-        calculation.dailySalesAverage(),
-        calculation.stockCoverageDays(),
-        product.expirationDays(),
-        product.supplierLeadTime(),
-        analysisDate);
+    return findFlowById(Long.toString(id), scope);
   }
 
   public List<FlowDTO> listFlows(StoreScope scope) {
@@ -76,13 +75,15 @@ public class FlowService {
 
   public List<FlowDTO> listFlows(
       String flowType, String productId, String status, StoreScope scope) {
-    if (flowType != null && !VALID_FLOW_TYPES.contains(flowType)) {
-      throw new InvalidRequestException();
-    }
-    if (status != null && !VALID_STATUSES.contains(status)) {
+    if (flowType != null && !VALID_FLOW_TYPES.contains(flowType)
+        || status != null && !VALID_STATUSES.contains(status)) {
       throw new InvalidRequestException();
     }
     return flowRepository.findAll(flowType, productId, status, scope);
+  }
+
+  public List<FlowDTO> currentFlows(String productId, StoreScope scope) {
+    return listFlows(null, productId, null, scope).stream().filter(FlowDTO::current).toList();
   }
 
   public FlowDTO findFlowById(String id, StoreScope scope) {

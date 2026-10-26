@@ -135,6 +135,11 @@ class PersistenceApiIntegrationTest {
     assertRequestWithoutTokenIsUnauthorized();
     assertRequestWithInvalidTokenIsUnauthorized();
     assertRequestWithInvalidClaimsIsUnauthorized();
+    JsonNode apiDocs = get("/v3/api-docs", 200);
+    assertThat(apiDocs.path("info").path("version").asString()).isEqualTo("3.0.0");
+    assertThat(apiDocs.path("paths").has("/flows/current")).isTrue();
+    assertThat(apiDocs.path("paths").has("/flows/analyze-login")).isTrue();
+    assertThat(apiDocs.path("paths").path("/profile").has("patch")).isTrue();
     seedAuthenticatedUser();
     ERP_RESPONSE.set(initialErpPayload());
 
@@ -163,6 +168,10 @@ class PersistenceApiIntegrationTest {
     shouldRejectSnapshot(validSnapshot.replaceFirst("SKU-HIGH", "A".repeat(101)));
     shouldRejectSnapshot(validSnapshot.replaceFirst("REGION-NORTH", "REGION-CONFLICT"));
 
+    JsonNode insufficient = post("/flows/analyze", "{\"product_id\":\"SKU-HIGH:STORE-1\"}", 201);
+    assertThat(insufficient.path("status").asString()).isEqualTo("INSUFFICIENT_DATA");
+    assertThat(insufficient.path("flow_type").isNull()).isTrue();
+    seedComparableProducts();
     String highFlowId = analyze("SKU-HIGH:STORE-1", "HIGH");
     String mediumFlowId = analyze("SKU-MEDIUM:STORE-1", "MEDIUM");
     String lowFlowId = analyze("SKU-LOW:South Branch", "LOW");
@@ -174,71 +183,116 @@ class PersistenceApiIntegrationTest {
     assertThat(get("/flows?flow_type=HIGH", 200).size()).isEqualTo(1);
     assertThat(get("/flows?product_id=SKU-HIGH:STORE-1&status=ANALYZED", 200).size()).isEqualTo(1);
 
-    JsonNode order = post("/actions/generate", "{\"flow_id\":\"" + highFlowId + "\"}", 201);
-    JsonNode promotion =
-        post(
-            "/actions/generate",
-            """
-            {"flow_id":"%s","promotion_valid_from":"%s","promotion_valid_until":"%s"}
-            """
-                .formatted(lowFlowId, LocalDate.now().plusDays(1), LocalDate.now().plusDays(8)),
-            201);
-    JsonNode noAction = post("/actions/generate", "{\"flow_id\":\"" + mediumFlowId + "\"}", 201);
-    assertThat(order.path("generated_actions").size()).isEqualTo(1);
-    assertThat(promotion.path("generated_actions").size()).isEqualTo(1);
+    long north = get("/branches", 200).get(0).path("store_id").asLong();
+    long south = get("/branches", 200).get(1).path("store_id").asLong();
+    seedOperationalActor(1006L, "EMPLOYEE", north);
+    seedOperationalActor(1007L, "EMPLOYEE", south);
+    seedOperationalActor(1008L, "MANAGER", south);
+    String employeeNorth = tokenFor(1006L, "operational1006@test.example");
+    String employeeSouth = tokenFor(1007L, "operational1007@test.example");
+    String managerSouth = tokenFor(1008L, "operational1008@test.example");
+    String managerNorth =
+        tokenFor(Long.parseLong(replacementManagerId), "replacement@test.example");
+    String orderBody =
+        "{\"flow_id\":\""
+            + highFlowId
+            + "\",\"action_type\":\"ORDER\",\"quantity\":20,\"desired_order_date\":\""
+            + LocalDate.now().plusDays(5)
+            + "\"}";
+    post("/actions/generate", orderBody, 403);
+    JsonNode order = postAs("/actions/generate", orderBody, 201, employeeNorth);
+    assertThat(postAs("/actions/generate", orderBody, 201, employeeNorth)).isEqualTo(order);
+    String newerHighFlowId = analyze("SKU-HIGH:STORE-1", "HIGH");
+    postAs("/actions/generate", orderBody.replace(highFlowId, newerHighFlowId), 409, employeeNorth);
+    String promotionBody =
+        "{\"flow_id\":\""
+            + lowFlowId
+            + "\",\"action_type\":\"PROMOTION\",\"discount_percentage\":15,\"promotion_duration_days\":7}";
+    JsonNode promotion = postAs("/actions/generate", promotionBody, 201, employeeSouth);
+    assertThat(order.path("generated_actions").get(0).path("quantity").asInt()).isEqualTo(20);
+    assertThat(promotion.path("generated_actions").get(0).path("discount_percentage").asInt())
+        .isEqualTo(15);
+    postAs("/actions/generate", promotionBody, 403, tokenFor(1004L, "regional@test.example"));
+    postAs("/actions/generate", promotionBody, 404, employeeNorth);
+    JsonNode noAction =
+        postAs("/actions/generate", "{\"flow_id\":\"" + mediumFlowId + "\"}", 201, employeeNorth);
     assertThat(noAction.path("generated_actions").size()).isZero();
-
-    long promotionSuggestionId =
-        Long.parseLong(promotion.path("generated_actions").get(0).path("id").asString());
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT created_by_id FROM suggestion WHERE id = ?",
-                Long.class,
-                promotionSuggestionId))
-        .isEqualTo(TEST_USER_ID);
-
     String orderId = order.path("generated_actions").get(0).path("id").asString();
     String promotionId = promotion.path("generated_actions").get(0).path("id").asString();
-    patch("/actions/" + promotionId + "/status", "{\"status\":\"IN_EMPLOYEE_TRIAGE\"}", 200);
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT employee_id FROM suggestion_triage WHERE suggestion_id = ?",
-                Long.class,
-                promotionSuggestionId))
-        .isEqualTo(TEST_USER_ID);
-    patch("/actions/" + promotionId + "/status", "{\"status\":\"SENT_TO_MANAGER\"}", 200);
-    patch(
+    patchAs("/actions/" + promotionId + "/status", "{\"status\":\"APPROVED\"}", 403, employeeSouth);
+    patchAs("/actions/" + promotionId + "/status", "{\"status\":\"APPROVED\"}", 409, managerSouth);
+    patchAs(
         "/actions/" + promotionId + "/status",
-        """
-        {"status":"APPROVED","final_promotion_valid_from":"%s","final_promotion_valid_until":"%s"}
-        """
-            .formatted(LocalDate.now().plusDays(2), LocalDate.now().plusDays(9)),
-        200);
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT manager_id FROM suggestion_decision WHERE suggestion_id = ?",
-                Long.class,
-                promotionSuggestionId))
-        .isEqualTo(TEST_USER_ID);
-    patch(
+        "{\"status\":\"IN_EMPLOYEE_TRIAGE\"}",
+        200,
+        employeeSouth);
+    patchAs(
+        "/actions/" + promotionId + "/status",
+        "{\"status\":\"SENT_TO_MANAGER\"}",
+        200,
+        employeeSouth);
+    patchAs("/actions/" + promotionId + "/status", "{\"status\":\"APPROVED\"}", 200, managerSouth);
+    patchAs(
+        "/actions/" + promotionId + "/status",
+        "{\"status\":\"SENT_TO_MANAGER\"}",
+        409,
+        employeeSouth);
+    patchAs(
+        "/actions/" + orderId + "/status", "{\"status\":\"SENT_TO_MANAGER\"}", 200, employeeNorth);
+    patchAs(
         "/actions/" + orderId + "/status",
         "{\"status\":\"REJECTED\",\"justification\":\"Demand changed\"}",
-        200);
-
+        200,
+        managerNorth);
     assertThat(get("/actions?status=APPROVED&action_type=PROMOTION", 200).size()).isEqualTo(1);
-    assertThat(get("/dashboard/summary", 200).isObject()).isTrue();
+    assertThat(get("/dashboard/summary", 200).path("active_actions").asInt()).isZero();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM suggestion_log", Integer.class))
-        .isEqualTo(6);
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT COUNT(*) FROM suggestion_log WHERE user_id = ?",
-                Integer.class,
-                TEST_USER_ID))
-        .isEqualTo(6);
+        .isEqualTo(7);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM suggestion_decision", Integer.class))
         .isEqualTo(2);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM suggestion_triage", Integer.class))
-        .isEqualTo(1);
+        .isEqualTo(2);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT final_batch_count FROM suggestion_decision WHERE suggestion_id = ?",
+                Integer.class,
+                Long.parseLong(orderId)))
+        .isNull();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT final_discount_percentage FROM suggestion_decision WHERE suggestion_id = ?",
+                java.math.BigDecimal.class,
+                Long.parseLong(promotionId)))
+        .isEqualByComparingTo("15");
+    postAs("/actions/generate", orderBody.replace(highFlowId, newerHighFlowId), 201, employeeNorth);
+    String loginBody = "{\"login_id\":\"33ed01e2-813b-4b24-a0e2-29c11be24562\"}";
+    post("/flows/analyze-login", loginBody, 200);
+    Integer analysisCount =
+        jdbc.queryForObject("SELECT COUNT(*) FROM product_analysis", Integer.class);
+    post("/flows/analyze-login", loginBody, 200);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM product_analysis", Integer.class))
+        .isEqualTo(analysisCount);
+    JsonNode current = get("/flows/current", 200);
+    assertThat(current.size()).isEqualTo(15);
+    assertThat(current.get(0).path("is_current").asBoolean()).isTrue();
+    postAs("/actions/generate", orderBody, 409, employeeNorth);
+    assertThat(
+            patchAs(
+                    "/profile",
+                    "{\"name\":\"Updated Employee\",\"profile_photo_url\":\"https://images.example.com/photo.jpg\"}",
+                    200,
+                    employeeNorth)
+                .path("name")
+                .asString())
+        .isEqualTo("Updated Employee");
+    patchAs("/profile", "{\"role\":\"ADMIN\"}", 400, employeeNorth);
+    patchAs("/profile", "{\"profile_photo_url\":\"javascript:invalid\"}", 400, employeeNorth);
+    patchAs("/profile", "{}", 400, employeeNorth);
+    assertThat(
+            patchAs("/profile", "{\"profile_photo_url\":\"\"}", 200, employeeNorth)
+                .path("profile_photo_url")
+                .isNull())
+        .isTrue();
 
     ERP_RESPONSE.set(updatedErpPayload());
     assertThat(erpSyncService.syncNow()).isTrue();
@@ -251,6 +305,46 @@ class PersistenceApiIntegrationTest {
     assertThatThrownBy(erpSyncService::syncNow).isInstanceOf(IllegalStateException.class);
     assertThat(erpSyncService.hasCompletedSync()).isTrue();
     assertThat(get("/products", 200).size()).isEqualTo(1);
+  }
+
+  private void seedComparableProducts() {
+    jdbc.update("UPDATE product SET unit_of_measure = 'UN'");
+    for (String sku : java.util.List.of("SKU-HIGH", "SKU-MEDIUM", "SKU-LOW")) {
+      for (int index = 1; index <= 4; index++) {
+        Long id =
+            jdbc.queryForObject(
+                """
+            INSERT INTO product (erp_id, sku, name, category_id, unit_of_measure, sale_price)
+            SELECT ?, ?, 'Comparable product', category_id, 'UN', 10 FROM product WHERE sku = ? RETURNING id
+            """,
+                Long.class,
+                sku + "-PEER" + index,
+                sku + "-PEER" + index,
+                sku);
+        int sales = "SKU-MEDIUM".equals(sku) ? index * index : index;
+        jdbc.update(
+            """
+            INSERT INTO product_store (product_id, store_id, sales_7d, sales_30d, sale_price, unit_cost)
+            SELECT ?, store_id, ?, 30, 10, 5 FROM product_store ps
+            JOIN product p ON p.id = ps.product_id WHERE p.sku = ?
+            """,
+            id,
+            sales,
+            sku);
+      }
+    }
+  }
+
+  private void seedOperationalActor(long id, String role, long store) {
+    jdbc.update(
+        """
+        INSERT INTO user_account (id, role_id, name, email, password_hash)
+        SELECT ?, id, 'Operational actor', ?, 'test-hash' FROM role WHERE code = ?
+        """,
+        id,
+        "operational" + id + "@test.example",
+        role);
+    jdbc.update("INSERT INTO user_store (user_id, store_id) VALUES (?, ?)", id, store);
   }
 
   private String analyze(String productId, String expectedType) throws Exception {
