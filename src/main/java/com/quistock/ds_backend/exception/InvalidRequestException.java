@@ -5,6 +5,10 @@ import java.io.Serial;
 public class InvalidRequestException extends RuntimeException {
   @Serial private static final long serialVersionUID = 1L;
 
+  public InvalidRequestException(Throwable cause) {
+    super("Required fields are missing or invalid.", cause);
+  }
+
   public InvalidRequestException() {
     super("Required fields are missing or invalid.");
   }

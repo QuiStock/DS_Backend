@@ -13,7 +13,6 @@ import com.quistock.ds_backend.model.dto.ActionDTO;
 import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.ActionStatusResponse;
 import com.quistock.ds_backend.model.dto.FlowDTO;
-import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
 import com.quistock.ds_backend.model.dto.UpdateActionStatusRequest;
 import com.quistock.ds_backend.repository.ActionRepository;
 import com.quistock.ds_backend.repository.StoreScope;
@@ -37,51 +36,58 @@ class ActionServiceTest {
   void setUp() {
     flowService = mock(FlowService.class);
     actionRepository = mock(ActionRepository.class);
-    actionService = new ActionService(flowService, actionRepository);
+    actionService =
+        new ActionService(
+            flowService,
+            actionRepository,
+            mock(UserAccessGuard.class),
+            new ActionCreationValidator(
+                java.time.Clock.fixed(
+                    Instant.parse("2026-10-01T12:00:00Z"), java.time.ZoneOffset.UTC)));
   }
 
   @Test
-  void shouldGeneratePromotionForLowFlow() {
-    FlowDTO flow = flow("101", "LOW");
-    ActionDTO action = action("501", "PROMOTION", "GENERATED");
-    when(flowService.findFlowById("101", SCOPE)).thenReturn(flow);
-    when(actionRepository.createGenerated(
-            flow,
-            "PROMOTION",
-            "Expiration or excess-stock risk: create a promotion.",
-            PROMOTION_START,
-            PROMOTION_END,
-            SCOPE))
-        .thenReturn(action);
-
-    GenerateActionsResponse response =
-        actionService.generateActions("101", PROMOTION_START, PROMOTION_END, SCOPE);
-
-    assertThat(response.flowId()).isEqualTo("101");
-    assertThat(response.generatedActions()).containsExactly(action);
-  }
-
-  @Test
-  void shouldGenerateStockOrderForHighFlow() {
+  void shouldGeneratePromotionBasedOnRiskRatherThanSalesClass() {
     FlowDTO flow = flow("101", "HIGH");
-    ActionDTO action = action("501", "ORDER", "GENERATED");
-    when(flowService.findFlowById("101", SCOPE)).thenReturn(flow);
+    ActionDTO action = action("501", "PROMOTION", "GENERATED");
+    when(flowService.findFlowById("101", SCOPE))
+        .thenReturn(withRisks(flow, List.of("NEAR_EXPIRY")));
     when(actionRepository.createGenerated(
-            flow, "ORDER", "Stockout risk: replenish stock.", null, null, SCOPE))
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.eq(SCOPE)))
         .thenReturn(action);
-
-    ActionDTO generated =
-        actionService.generateActions("101", null, null, SCOPE).generatedActions().get(0);
-
-    assertThat(generated.actionType()).isEqualTo("ORDER");
-    assertThat(generated.status()).isEqualTo("GENERATED");
+    var request =
+        new com.quistock.ds_backend.model.dto.GenerateActionsRequest(
+            "101", null, null, "PROMOTION", null, null, new BigDecimal("15"), 7);
+    assertThat(actionService.generateActions(request, SCOPE).generatedActions())
+        .containsExactly(action);
   }
 
   @Test
-  void shouldGenerateNoActionForMediumFlow() {
-    when(flowService.findFlowById("101", SCOPE)).thenReturn(flow("101", "MEDIUM"));
+  void shouldGenerateOrderFromStockoutRisk() {
+    when(flowService.findFlowById("101", SCOPE))
+        .thenReturn(withRisks(flow("101", "LOW"), List.of("STOCKOUT")));
+    when(actionRepository.createGenerated(
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.eq(SCOPE)))
+        .thenReturn(action("501", "ORDER", "GENERATED"));
+    var request =
+        new com.quistock.ds_backend.model.dto.GenerateActionsRequest(
+            "101", null, null, "ORDER", 20, PROMOTION_START, null, null);
+    assertThat(actionService.generateActions(request, SCOPE).generatedActions().get(0).actionType())
+        .isEqualTo("ORDER");
+  }
 
-    assertThat(actionService.generateActions("101", null, null, SCOPE).generatedActions())
+  @Test
+  void shouldGenerateNoActionWithoutRisk() {
+    when(flowService.findFlowById("101", SCOPE)).thenReturn(flow("101", "MEDIUM"));
+    assertThat(
+            actionService
+                .generateActions(
+                    new com.quistock.ds_backend.model.dto.GenerateActionsRequest("101"), SCOPE)
+                .generatedActions())
         .isEmpty();
   }
 
@@ -89,18 +95,41 @@ class ActionServiceTest {
   void shouldPropagateFlowNotFound() {
     when(flowService.findFlowById("UNKNOWN", SCOPE))
         .thenThrow(new FlowNotFoundException("UNKNOWN"));
-
-    assertThatThrownBy(() -> actionService.generateActions("UNKNOWN", null, null, SCOPE))
+    assertThatThrownBy(
+            () ->
+                actionService.generateActions(
+                    new com.quistock.ds_backend.model.dto.GenerateActionsRequest("UNKNOWN"), SCOPE))
         .isInstanceOf(FlowNotFoundException.class);
   }
 
   @Test
-  void shouldRejectPromotionDatesForNonPromotionFlow() {
-    when(flowService.findFlowById("101", SCOPE)).thenReturn(flow("101", "HIGH"));
-
-    assertThatThrownBy(
-            () -> actionService.generateActions("101", PROMOTION_START, PROMOTION_END, SCOPE))
+  void shouldRejectPromotionWithoutCompatibleRisk() {
+    when(flowService.findFlowById("101", SCOPE))
+        .thenReturn(withRisks(flow("101", "HIGH"), List.of("STOCKOUT")));
+    var request =
+        new com.quistock.ds_backend.model.dto.GenerateActionsRequest(
+            "101", PROMOTION_START, PROMOTION_END, "PROMOTION", null, null, BigDecimal.TEN, null);
+    assertThatThrownBy(() -> actionService.generateActions(request, SCOPE))
         .isInstanceOf(InvalidRequestException.class);
+  }
+
+  private FlowDTO withRisks(FlowDTO flow, List<String> risks) {
+    return new FlowDTO(
+        flow.id(),
+        flow.productId(),
+        flow.productName(),
+        flow.flowType(),
+        flow.status(),
+        flow.reason(),
+        flow.dailySalesAverage(),
+        flow.stockCoverageDays(),
+        flow.expirationDays(),
+        flow.supplierLeadTime(),
+        flow.analysisDate(),
+        risks,
+        flow.classifier(),
+        true,
+        flow.storeId());
   }
 
   @Test
@@ -115,6 +144,13 @@ class ActionServiceTest {
             "Expiration or excess-stock risk: create a promotion.",
             PROMOTION_START,
             PROMOTION_END,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
             null);
     when(actionRepository.findAll("GENERATED", "PROMOTION", "101", SCOPE))
         .thenReturn(List.of(action));
@@ -200,6 +236,10 @@ class ActionServiceTest {
         new BigDecimal("9.92"),
         0,
         3,
-        Instant.parse("2026-08-28T12:00:00Z"));
+        Instant.parse("2026-08-28T12:00:00Z"),
+        java.util.List.of(),
+        "SALES_PERCENTILES_V1",
+        true,
+        1L);
   }
 }

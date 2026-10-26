@@ -19,7 +19,7 @@ import org.springframework.stereotype.Service;
 public class DashboardService {
   private static final String GENERATED_STATUS = "GENERATED";
   private static final Set<String> ACTIVE_ACTION_STATUSES =
-      Set.of("GENERATED", "IN_EMPLOYEE_TRIAGE", "SENT_TO_MANAGER", "APPROVED");
+      Set.of("GENERATED", "IN_EMPLOYEE_TRIAGE", "SENT_TO_MANAGER");
 
   private final FlowService flowService;
   private final ActionService actionService;
@@ -61,7 +61,9 @@ public class DashboardService {
   private List<FlowDTO> latestFlowsByProduct(StoreScope scope) {
     Map<String, FlowDTO> latestFlows =
         flowService.listFlows(scope).stream()
-            .filter(flow -> flow.productId() != null)
+            .filter(
+                flow ->
+                    flow.productId() != null && flow.current() && "ANALYZED".equals(flow.status()))
             .collect(
                 Collectors.toMap(
                     FlowDTO::productId,

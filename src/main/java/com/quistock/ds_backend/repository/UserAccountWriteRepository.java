@@ -53,6 +53,20 @@ public class UserAccountWriteRepository {
             .addValue("status", status));
   }
 
+  public void updateProfile(long id, String name, String photoUrl) {
+    jdbc.update(
+        """
+        UPDATE user_account SET name = COALESCE(:name, name),
+          profile_photo_url = CASE WHEN CAST(:photoUrl AS text) IS NULL THEN profile_photo_url
+            ELSE NULLIF(:photoUrl, '') END, updated_at = CURRENT_TIMESTAMP
+        WHERE id = :id AND status = 'ACTIVE'
+        """,
+        new MapSqlParameterSource()
+            .addValue("id", id)
+            .addValue("name", name)
+            .addValue("photoUrl", photoUrl));
+  }
+
   public void insertAuditEvent(
       long actorId, long targetId, String action, String role, String email) {
     jdbc.update(

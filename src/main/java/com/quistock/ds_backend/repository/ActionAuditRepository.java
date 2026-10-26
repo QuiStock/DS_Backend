@@ -78,8 +78,14 @@ class ActionAuditRepository {
           previous_data, new_data, reason, occurred_at
         ) VALUES (
           :suggestionId, :userId, CAST(:event AS suggestion_log_event), :status,
-          NULL, NULL, NULL, :validFrom, :validUntil,
-          CAST(:previousData AS jsonb), CAST(:newData AS jsonb), :reason, CURRENT_TIMESTAMP
+          (SELECT current_batch_count FROM suggestion WHERE id = :suggestionId),
+          (SELECT current_discount_percentage FROM suggestion WHERE id = :suggestionId),
+          (SELECT promotional_price FROM suggestion WHERE id = :suggestionId), :validFrom, :validUntil,
+          CAST(:previousData AS jsonb), CAST(:newData AS jsonb) ||
+            (SELECT jsonb_build_object('quantity', current_batch_count,
+               'desired_order_date', desired_order_date, 'discount_percentage', current_discount_percentage,
+               'reference_sale_price', reference_sale_price, 'promotional_price', promotional_price)
+             FROM suggestion WHERE id = :suggestionId), :reason, CURRENT_TIMESTAMP
         )
         """,
         new MapSqlParameterSource()

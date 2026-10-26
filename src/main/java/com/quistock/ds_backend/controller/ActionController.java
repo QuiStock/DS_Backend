@@ -52,10 +52,14 @@ public class ActionController {
     this.accessGuard = accessGuard;
   }
 
+  @ApiResponse(
+      responseCode = "409",
+      description = "Já existe ação pendente do mesmo tipo/produto/loja ou análise não vigente.")
   @PostMapping("/generate")
   @Operation(
       summary = "Gerar ações para uma análise",
-      description = "Cria sugestões de pedido ou promoção e registra o autor pelo sub do JWT.")
+      description =
+          "Funcionário solicita pedido ou promoção conforme os riscos. Não executa operação no ERP.")
   @ApiResponse(responseCode = "201", description = "Recurso criado.")
   @ApiResponse(
       responseCode = "400",
@@ -83,10 +87,7 @@ public class ActionController {
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(
             actionService.generateActions(
-                request.flowId(),
-                request.promotionValidFrom(),
-                request.promotionValidUntil(),
-                accessGuard.requireStoreScope(authenticatedUserId(jwt), null)));
+                request, accessGuard.requireStoreScope(authenticatedUserId(jwt), null)));
   }
 
   @GetMapping
@@ -126,6 +127,7 @@ public class ActionController {
         accessGuard.requireStoreScope(authenticatedUserId(jwt), storeId));
   }
 
+  @ApiResponse(responseCode = "409", description = "Transição de status não permitida.")
   @PatchMapping("/{id}/status")
   @Operation(
       summary = "Atualizar status da ação",

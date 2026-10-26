@@ -92,5 +92,16 @@ class ActionDecisionRepository {
             .addValue("validFrom", rejected ? null : validFrom)
             .addValue("validUntil", rejected ? null : validUntil)
             .addValue("justification", justification));
+    if (!rejected) {
+      jdbc.update(
+          """
+          UPDATE suggestion_decision sd SET
+            final_batch_count = sg.current_batch_count,
+            final_discount_percentage = sg.current_discount_percentage,
+            final_promotional_price = sg.promotional_price
+          FROM suggestion sg WHERE sd.suggestion_id = sg.id AND sg.id = :id
+          """,
+          java.util.Map.of("id", suggestionId));
+    }
   }
 }

@@ -1,64 +1,91 @@
 package com.quistock.ds_backend.service;
 
 import com.quistock.ds_backend.exception.ActionNotFoundException;
-import com.quistock.ds_backend.model.dto.ActionDTO;
+import com.quistock.ds_backend.exception.ConflictException;
+import com.quistock.ds_backend.exception.InvalidRequestException;
 import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.ActionStatusResponse;
 import com.quistock.ds_backend.model.dto.FlowDTO;
+import com.quistock.ds_backend.model.dto.GenerateActionsRequest;
 import com.quistock.ds_backend.model.dto.GenerateActionsResponse;
 import com.quistock.ds_backend.model.dto.UpdateActionStatusRequest;
 import com.quistock.ds_backend.repository.ActionRepository;
 import com.quistock.ds_backend.repository.StoreScope;
-import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import org.springframework.stereotype.Service;
 
 @Service
 public class ActionService {
+  private static final int SINGLE_TYPE = 1;
   private static final String ORDER = "ORDER";
   private static final String PROMOTION = "PROMOTION";
-  private static final Map<String, ActionRule> FLOW_ACTIONS =
-      Map.of(
-          "HIGH", new ActionRule(ORDER, "Stockout risk: replenish stock."),
-          "MEDIUM", new ActionRule(null, null),
-          "LOW", new ActionRule(PROMOTION, "Expiration or excess-stock risk: create a promotion."));
-
   private final FlowService flowService;
   private final ActionRepository actionRepository;
+  private final UserAccessGuard accessGuard;
+  private final ActionCreationValidator creationValidator;
 
-  public ActionService(FlowService flowService, ActionRepository actionRepository) {
+  public ActionService(
+      FlowService flowService,
+      ActionRepository actionRepository,
+      UserAccessGuard accessGuard,
+      ActionCreationValidator creationValidator) {
     this.flowService = flowService;
     this.actionRepository = actionRepository;
+    this.accessGuard = accessGuard;
+    this.creationValidator = creationValidator;
   }
 
-  public GenerateActionsResponse generateActions(
-      String flowId,
-      LocalDate promotionValidFrom,
-      LocalDate promotionValidUntil,
-      StoreScope scope) {
-    FlowDTO flow = flowService.findFlowById(flowId, scope);
-    ActionRule rule = FLOW_ACTIONS.get(flow.flowType());
-    if (rule == null) {
-      throw new IllegalArgumentException("Unsupported flow type: " + flow.flowType());
+  public GenerateActionsResponse generateActions(GenerateActionsRequest request, StoreScope scope) {
+    accessGuard.requireRole(scope.actorId(), UserManagementRules.EMPLOYEE);
+    FlowDTO flow = flowService.findFlowById(request.flowId(), scope);
+    if (!flow.current() || !"ANALYZED".equals(flow.status())) {
+      throw new ConflictException();
     }
-    if (rule.actionType() == null) {
-      ActionRequestValidator.validatePromotionDates(
-          null, promotionValidFrom, promotionValidUntil, false);
+    String type = resolveType(request.actionType(), flow);
+    if (type == null) {
+      requireEmptyActionFields(request);
       return new GenerateActionsResponse(flow.id(), List.of());
     }
-
-    ActionRequestValidator.validatePromotionDates(
-        rule.actionType(), promotionValidFrom, promotionValidUntil, true);
-    ActionDTO action =
-        actionRepository.createGenerated(
-            flow,
-            rule.actionType(),
-            rule.justification(),
-            promotionValidFrom,
-            promotionValidUntil,
-            scope);
+    var details = creationValidator.validate(type, request);
+    var action = actionRepository.createGenerated(flow, details, scope);
     return new GenerateActionsResponse(flow.id(), List.of(action));
+  }
+
+  private void requireEmptyActionFields(GenerateActionsRequest request) {
+    if (request.quantity() != null
+        || request.desiredOrderDate() != null
+        || request.discountPercentage() != null
+        || request.promotionDurationDays() != null
+        || request.promotionValidFrom() != null
+        || request.promotionValidUntil() != null) {
+      throw new InvalidRequestException();
+    }
+  }
+
+  private String resolveType(String requested, FlowDTO flow) {
+    List<String> compatible = new ArrayList<>();
+    if (flow.risks().contains("STOCKOUT")) {
+      compatible.add(ORDER);
+    }
+    if (promotionRisk(flow)) {
+      compatible.add(PROMOTION);
+    }
+    if (requested != null) {
+      if (!compatible.contains(requested)) {
+        throw new InvalidRequestException();
+      }
+      return requested;
+    }
+    if (compatible.size() > SINGLE_TYPE) {
+      throw new InvalidRequestException();
+    }
+    return compatible.isEmpty() ? null : compatible.get(0);
+  }
+
+  private boolean promotionRisk(FlowDTO flow) {
+    return !flow.risks().contains("EXPIRED")
+        && (flow.risks().contains("EXPIRATION") || flow.risks().contains("NEAR_EXPIRY"));
   }
 
   public List<ActionListItemDTO> listActions(StoreScope scope) {
@@ -66,21 +93,26 @@ public class ActionService {
   }
 
   public List<ActionListItemDTO> listActions(
-      String status, String actionType, String flowId, StoreScope scope) {
-    ActionRequestValidator.validateFilters(status, actionType);
-    return actionRepository.findAll(status, actionType, flowId, scope);
+      String status, String type, String flowId, StoreScope scope) {
+    ActionRequestValidator.validateFilters(status, type);
+    return actionRepository.findAll(status, type, flowId, scope);
   }
 
   public ActionStatusResponse updateActionStatus(
-      String actionId, UpdateActionStatusRequest request, StoreScope scope) {
+      String id, UpdateActionStatusRequest request, StoreScope scope) {
     ActionRequestValidator.validateStatus(request);
-    String actionType = actionRepository.findTypeById(actionId, scope);
-    if (actionType == null) {
-      throw new ActionNotFoundException(actionId);
+    String requiredRole =
+        switch (request.status()) {
+          case "IN_EMPLOYEE_TRIAGE", "SENT_TO_MANAGER" -> UserManagementRules.EMPLOYEE;
+          case "APPROVED", "REJECTED" -> UserManagementRules.MANAGER;
+          default -> throw new InvalidRequestException();
+        };
+    accessGuard.requireRole(scope.actorId(), requiredRole);
+    String type = actionRepository.findTypeById(id, scope);
+    if (type == null) {
+      throw new ActionNotFoundException(id);
     }
-    ActionRequestValidator.validateFinalDates(actionType, request.status(), request);
-    return actionRepository.updateStatus(actionId, request, scope);
+    ActionRequestValidator.validateFinalDates(type, request.status(), request);
+    return actionRepository.updateStatus(id, request, scope);
   }
-
-  private record ActionRule(String actionType, String justification) {}
 }

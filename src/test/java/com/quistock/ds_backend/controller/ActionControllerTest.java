@@ -47,7 +47,8 @@ class ActionControllerTest {
     ActionDTO action =
         new ActionDTO(
             "501", "PROMOTION", "GENERATED", "Product has expiration or excess stock risk.");
-    when(actionService.generateActions("101", null, null, SCOPE))
+    when(actionService.generateActions(
+            new com.quistock.ds_backend.model.dto.GenerateActionsRequest("101"), SCOPE))
         .thenReturn(new GenerateActionsResponse("101", List.of(action)));
 
     mockMvc(actionService)
@@ -78,7 +79,8 @@ class ActionControllerTest {
   @Test
   void shouldReturn404WhenFlowIsNotFound() throws Exception {
     ActionService actionService = mock(ActionService.class);
-    when(actionService.generateActions("UNKNOWN", null, null, SCOPE))
+    when(actionService.generateActions(
+            new com.quistock.ds_backend.model.dto.GenerateActionsRequest("UNKNOWN"), SCOPE))
         .thenThrow(new FlowNotFoundException("UNKNOWN"));
 
     mockMvc(actionService)
