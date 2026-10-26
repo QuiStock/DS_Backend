@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
@@ -19,15 +20,23 @@ public record GenerateActionsRequest(
             description = "Obrigatório se ambos os riscos estiverem presentes.")
         @JsonProperty("action_type")
         String actionType,
-    @Schema(description = "Quantidade inteira positiva do pedido, preenchida pelo usuário.")
+    @Schema(
+            type = "integer",
+            format = "int32",
+            description = "Quantidade inteira positiva do pedido, preenchida pelo usuário.")
         @Positive
-        Integer quantity,
+        @Digits(integer = 10, fraction = 0)
+        @DecimalMax("2147483647")
+        BigDecimal quantity,
     @Schema(
             description =
                 "Data desejada pelo usuário; não garante entrega. Deve ser hoje ou futura.")
         @JsonProperty("desired_order_date")
         LocalDate desiredOrderDate,
-    @JsonProperty("discount_percentage") @DecimalMin("0") @DecimalMax("100")
+    @JsonProperty("discount_percentage")
+        @DecimalMin("0")
+        @DecimalMax("100")
+        @Digits(integer = 3, fraction = 2)
         BigDecimal discountPercentage,
     @Schema(description = "Duração em dias, incluindo hoje. Alternativa às duas datas explícitas.")
         @JsonProperty("promotion_duration_days")

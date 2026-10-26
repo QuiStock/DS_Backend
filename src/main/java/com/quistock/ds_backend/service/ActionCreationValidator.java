@@ -27,7 +27,7 @@ public class ActionCreationValidator {
         "User-requested stock replenishment.",
         null,
         null,
-        request.quantity(),
+        request.quantity().intValueExact(),
         request.desiredOrderDate(),
         null);
   }

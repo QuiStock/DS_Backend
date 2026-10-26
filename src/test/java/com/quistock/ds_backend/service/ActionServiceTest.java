@@ -75,7 +75,7 @@ class ActionServiceTest {
         .thenReturn(action("501", "ORDER", "GENERATED"));
     var request =
         new com.quistock.ds_backend.model.dto.GenerateActionsRequest(
-            "101", null, null, "ORDER", 20, PROMOTION_START, null, null);
+            "101", null, null, "ORDER", new BigDecimal("20"), PROMOTION_START, null, null);
     assertThat(actionService.generateActions(request, SCOPE).generatedActions().get(0).actionType())
         .isEqualTo("ORDER");
   }
