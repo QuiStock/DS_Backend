@@ -38,7 +38,10 @@ class UserAccessGuardTest {
 
     assertThatThrownBy(() -> guard.requireStoreScope(1001L, null))
         .isInstanceOf(AccessDeniedException.class)
-        .hasMessage("The account has no active store assignment.");
+        .hasMessage("The account has no active store assignment.")
+        .satisfies(
+            error ->
+                assertThat(error.getClass().getSimpleName()).isEqualTo("NoActiveStoreException"));
   }
 
   @Test

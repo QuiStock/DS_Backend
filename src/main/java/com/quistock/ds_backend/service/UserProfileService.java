@@ -33,7 +33,11 @@ class UserProfileService {
 
   @Transactional(readOnly = true)
   public UserDTO profile(long actorId) {
-    accessGuard.requireRoleOrActive(actorId);
+    var actor = accessGuard.requireRoleOrActive(actorId);
+    if (UserManagementRules.EMPLOYEE.equals(actor.role())
+        || UserManagementRules.MANAGER.equals(actor.role())) {
+      accessGuard.requireStoreScope(actorId, null);
+    }
     return readRepository.findUser(actorId).orElseThrow(UserNotFoundException::new);
   }
 
