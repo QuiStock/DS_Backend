@@ -26,7 +26,8 @@ import org.springframework.web.bind.annotation.RestController;
     content = @Content)
 @ApiResponse(
     responseCode = "403",
-    description = "Permissão insuficiente ou CSRF inválido em autenticação por cookie.",
+    description =
+        "Permissão insuficiente, ausência de loja ativa (NO_ACTIVE_STORE) ou CSRF inválido.",
     content = @Content)
 @RestController
 @RequestMapping("/dashboard")

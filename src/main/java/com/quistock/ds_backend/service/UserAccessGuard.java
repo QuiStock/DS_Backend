@@ -1,6 +1,7 @@
 package com.quistock.ds_backend.service;
 
 import com.quistock.ds_backend.exception.InvalidRequestException;
+import com.quistock.ds_backend.exception.NoActiveStoreException;
 import com.quistock.ds_backend.repository.BranchRepository;
 import com.quistock.ds_backend.repository.StoreScope;
 import com.quistock.ds_backend.repository.UserAccountReadRepository;
@@ -43,9 +44,7 @@ public class UserAccessGuard {
               actor.id(),
               readRepository
                   .findActiveStoreAssignment(actor.id())
-                  .orElseThrow(
-                      () ->
-                          new AccessDeniedException("The account has no active store assignment.")),
+                  .orElseThrow(NoActiveStoreException::new),
               null);
       default -> throw new AccessDeniedException("This role cannot access store data.");
     };
