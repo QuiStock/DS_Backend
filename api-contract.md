@@ -882,13 +882,3 @@ liveness to decide restarts. Startup failures still prevent these routes from se
 Dependency results are cached for 5 seconds by default (`HEALTH_CACHE_TTL` overrides
 this duration; `0ms` disables caching). Concurrent dependency checks share in-flight
 work. Dependency state transitions may remain cached until the configured TTL expires.
-
-### Mobile store eligibility
-
-`GET /profile` requires an active store assignment for EMPLOYEE and MANAGER. ADMIN and
-REGIONAL_MANAGER retain their existing eligibility. Store-scoped reads such as
-`GET /dashboard/summary?store_id=...` return HTTP 403 with `error=NO_ACTIVE_STORE` when
-the actor has no active store assignment (including an inactive store). Other authorization
-failures retain `FORBIDDEN`; an out-of-scope requested store does not imply loss of assignment.
-The summary payload is unchanged. Clients bind its result to the requested SQL store ID
-and current session, and discard results when either changes. This contract requires no SQL migration.

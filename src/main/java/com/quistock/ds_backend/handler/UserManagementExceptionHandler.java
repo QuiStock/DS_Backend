@@ -2,7 +2,6 @@ package com.quistock.ds_backend.handler;
 
 import com.quistock.ds_backend.exception.AssignmentTargetNotFoundException;
 import com.quistock.ds_backend.exception.ConflictException;
-import com.quistock.ds_backend.exception.NoActiveStoreException;
 import com.quistock.ds_backend.exception.UserNotFoundException;
 import com.quistock.ds_backend.model.dto.ErrorDTO;
 import org.springframework.http.HttpStatus;
@@ -30,12 +29,6 @@ public class UserManagementExceptionHandler {
   public ResponseEntity<ErrorDTO> handleConflict(ConflictException exception) {
     return ResponseEntity.status(HttpStatus.CONFLICT)
         .body(new ErrorDTO("CONFLICT", exception.getMessage()));
-  }
-
-  @ExceptionHandler(NoActiveStoreException.class)
-  public ResponseEntity<ErrorDTO> handleNoActiveStore() {
-    return ResponseEntity.status(HttpStatus.FORBIDDEN)
-        .body(new ErrorDTO("NO_ACTIVE_STORE", "The account has no active store assignment."));
   }
 
   @ExceptionHandler(AccessDeniedException.class)
