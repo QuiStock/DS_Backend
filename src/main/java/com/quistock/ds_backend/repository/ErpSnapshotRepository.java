@@ -4,7 +4,6 @@ import com.quistock.ds_backend.model.dto.ErpBatchDTO;
 import com.quistock.ds_backend.util.ErpValueParser;
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Locale;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -131,16 +130,6 @@ class ErpSnapshotRepository {
                 .addValue(SYNC_ID_PARAMETER, syncId),
             (resultSet, rowNumber) -> resultSet.getLong("id"));
     return ids.get(0);
-  }
-
-  void updateProductUnit(long productId, String unit) {
-    jdbc.update(
-        "UPDATE product SET unit_of_measure = :unit WHERE id = :id",
-        new MapSqlParameterSource()
-            .addValue("id", productId)
-            .addValue(
-                "unit",
-                unit == null || unit.isBlank() ? null : unit.strip().toUpperCase(Locale.ROOT)));
   }
 
   void upsertBatch(String erpId, ErpBatchDTO batch, long productId, long storeId, long syncId) {

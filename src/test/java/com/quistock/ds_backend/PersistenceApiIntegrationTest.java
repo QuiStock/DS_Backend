@@ -423,14 +423,13 @@ class PersistenceApiIntegrationTest {
   }
 
   private void seedComparableProducts() {
-    jdbc.update("UPDATE product SET unit_of_measure = 'UN'");
     for (String sku : java.util.List.of("SKU-HIGH", "SKU-MEDIUM", "SKU-LOW")) {
       for (int index = 1; index <= 4; index++) {
         Long id =
             jdbc.queryForObject(
                 """
-            INSERT INTO product (erp_id, sku, name, category_id, unit_of_measure, sale_price)
-            SELECT ?, ?, 'Comparable product', category_id, 'UN', 10 FROM product WHERE sku = ? RETURNING id
+            INSERT INTO product (erp_id, sku, name, category_id, sale_price)
+            SELECT ?, ?, 'Comparable product', category_id, 10 FROM product WHERE sku = ? RETURNING id
             """,
                 Long.class,
                 sku + "-PEER" + index,

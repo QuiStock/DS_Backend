@@ -135,7 +135,6 @@ class ErpSnapshotProcessor {
                     minimumStock,
                     context.syncId));
 
-    snapshotRepository.updateProductUnit(productId, newestBatch.unitOfMeasure());
     persistBatches(key, productBatches, productId, storeId, context);
     snapshotRepository.upsertProductStore(
         new ErpProductStoreSnapshot(

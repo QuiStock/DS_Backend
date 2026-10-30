@@ -25,8 +25,8 @@ class FlowAnalysisCalculator {
     return new Result(
         type,
         type == null
-            ? "Missing sales, category/unit or fewer than five comparable products."
-            : "Sales speed compared with the same category, unit and store.",
+            ? "Missing sales, category or fewer than five comparable products."
+            : "Sales speed compared with the same category and store.",
         daily,
         coverage,
         stock,
