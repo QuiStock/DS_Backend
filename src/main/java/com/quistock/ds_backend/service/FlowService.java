@@ -5,14 +5,18 @@ import com.quistock.ds_backend.exception.InvalidRequestException;
 import com.quistock.ds_backend.exception.ProductNotFoundException;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.ProductDTO;
+import com.quistock.ds_backend.repository.AnalysisExecutionRepository;
 import com.quistock.ds_backend.repository.ErpProjectionLock;
 import com.quistock.ds_backend.repository.FlowRepository;
 import com.quistock.ds_backend.repository.StoreScope;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -24,13 +28,16 @@ public class FlowService {
   private final FlowRepository flowRepository;
   private final FlowAnalysisCalculator analysisCalculator;
   private final Clock clock;
+  private final AnalysisExecutionRepository executions;
 
   public FlowService(
       ProductService productService,
       FlowRepository flowRepository,
       FlowAnalysisCalculator analysisCalculator,
       Clock clock,
-      ErpProjectionLock projectionLock) {
+      ErpProjectionLock projectionLock,
+      AnalysisExecutionRepository executions) {
+    this.executions = executions;
     this.projectionLock = projectionLock;
     this.productService = productService;
     this.flowRepository = flowRepository;
@@ -41,10 +48,28 @@ public class FlowService {
   @Transactional
   public FlowDTO analyzeProduct(String productId, StoreScope scope) {
     projectionLock.acquire();
-    return analyze(productService.findProductById(productId, scope), scope);
+    var product = productService.findProductById(productId, scope);
+    long executionId =
+        executions.start(FlowAnalysisCalculator.CLASSIFIER, LocalDate.now(clock), clock.instant());
+    try {
+      var result = analyze(product, scope, executionId);
+      executions.complete(executionId);
+      return result;
+    } catch (DataAccessException
+        | TransactionException
+        | IllegalStateException
+        | ProductNotFoundException
+        | FlowNotFoundException exception) {
+      try {
+        executions.fail(executionId);
+      } catch (DataAccessException | TransactionException | IllegalStateException statusException) {
+        exception.addSuppressed(statusException);
+      }
+      throw exception;
+    }
   }
 
-  public FlowDTO analyze(ProductDTO product, StoreScope scope) {
+  public FlowDTO analyze(ProductDTO product, StoreScope scope, long executionId) {
     var calculation =
         analysisCalculator.calculate(product, flowRepository.comparableSales(product.id(), scope));
     var snapshot =
@@ -62,7 +87,7 @@ public class FlowService {
             calculation.reason(),
             Instant.now(clock),
             calculation.risks());
-    long id = flowRepository.insertAnalysis(snapshot, scope);
+    long id = flowRepository.insertAnalysis(snapshot, scope, executionId);
     if (id < 0) {
       throw new ProductNotFoundException(product.id());
     }

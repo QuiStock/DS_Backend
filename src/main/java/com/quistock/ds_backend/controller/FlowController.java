@@ -4,7 +4,6 @@ import com.quistock.ds_backend.model.dto.AnalyzeProductRequest;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.LoginAnalysisRequest;
 import com.quistock.ds_backend.service.FlowService;
-import com.quistock.ds_backend.service.LoginAnalysisService;
 import com.quistock.ds_backend.service.UserAccessGuard;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -43,20 +42,19 @@ import org.springframework.web.bind.annotation.RestController;
 public class FlowController {
   private final FlowService flowService;
   private final UserAccessGuard accessGuard;
-  private final LoginAnalysisService loginAnalysis;
 
-  public FlowController(
-      FlowService service, UserAccessGuard accessGuard, LoginAnalysisService loginAnalysis) {
+  public FlowController(FlowService service, UserAccessGuard accessGuard) {
     this.flowService = service;
     this.accessGuard = accessGuard;
-    this.loginAnalysis = loginAnalysis;
   }
 
   @PostMapping("/analyze-login")
   @Operation(
-      summary = "Analisar após login",
+      summary = "Consultar análises após login (legado)",
+      deprecated = true,
       description =
-          "Processa lojas autorizadas após login. Reutilize login_id nas tentativas; não chame no refresh.")
+          "Somente consulta: não executa análise. Use GET /flows/current. O processamento ocorre"
+              + " diariamente às 08:00 em America/Sao_Paulo.")
   @ApiResponse(
       responseCode = "200",
       description = "Análises atuais, incluindo produtos com dados insuficientes.")
@@ -65,9 +63,8 @@ public class FlowController {
       @Valid @RequestBody LoginAnalysisRequest request,
       @RequestParam(name = "store_id", required = false) Long storeId,
       @AuthenticationPrincipal Jwt jwt) {
-    return loginAnalysis.analyzeLogin(
-        request.loginId(),
-        accessGuard.requireStoreScope(Long.parseLong(jwt.getSubject()), storeId));
+    return flowService.currentFlows(
+        null, accessGuard.requireStoreScope(Long.parseLong(jwt.getSubject()), storeId));
   }
 
   @GetMapping("/current")

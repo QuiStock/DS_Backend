@@ -9,7 +9,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -54,7 +53,7 @@ public class FlowRepository {
     this.objectMapper = objectMapper;
   }
 
-  public long insertAnalysis(AnalysisSnapshot analysis, StoreScope scope) {
+  public long insertAnalysis(AnalysisSnapshot analysis, StoreScope scope, long executionId) {
     ProductKey key = parseProductId(analysis.publicProductId());
     if (key == null) {
       return -1;
@@ -98,6 +97,7 @@ public class FlowRepository {
             .parameters()
             .addValue("productErpId", key.productErpId())
             .addValue("storeErpId", key.storeErpId())
+            .addValue("executionId", executionId)
             .addValue("flowType", analysis.flowType())
             .addValue("metrics", toJson(metrics))
             .addValue("context", toJson(context))
@@ -109,7 +109,7 @@ public class FlowRepository {
             INSERT INTO product_analysis (
               ml_execution_id, store_id, product_id, flow_type_id, metrics, context, created_at
             )
-            SELECT NULL, ps.store_id, ps.product_id, ft.id,
+            SELECT :executionId, ps.store_id, ps.product_id, ft.id,
                    CAST(:metrics AS jsonb), CAST(:context AS jsonb), :createdAt
             FROM product_store ps
             JOIN product p ON p.id = ps.product_id
@@ -205,24 +205,6 @@ public class FlowRepository {
             + StoreScope.SQL,
         scope.parameters().addValue("publicId", publicId),
         (row, index) -> row.getBigDecimal("sales_7d"));
-  }
-
-  public boolean claimLogin(UUID loginId, long storeId, StoreScope scope) {
-    jdbc.query(
-        "SELECT id FROM store WHERE id = :storeId FOR NO KEY UPDATE",
-        scope.parameters().addValue("storeId", storeId),
-        (row, index) -> row.getLong(1));
-    return jdbc.update(
-            """
-        INSERT INTO analysis_login_run (actor_id, login_id, store_id)
-        VALUES (:actorId, :loginId, :storeId) ON CONFLICT DO NOTHING
-        """,
-            scope
-                .parameters()
-                .addValue("actorId", scope.actorId())
-                .addValue("loginId", loginId)
-                .addValue("storeId", storeId))
-        > 0;
   }
 
   private List<String> readRisks(String json) {

@@ -32,18 +32,22 @@ class FlowServiceTest {
   private ProductService products;
   private FlowRepository repository;
   private FlowService service;
+  private com.quistock.ds_backend.repository.AnalysisExecutionRepository executions;
 
   @BeforeEach
   void setUp() {
     products = mock(ProductService.class);
     repository = mock(FlowRepository.class);
+    executions = mock(com.quistock.ds_backend.repository.AnalysisExecutionRepository.class);
+    when(executions.start(any(), any(), any())).thenReturn(42L);
     service =
         new FlowService(
             products,
             repository,
             calculator,
             TEST_CLOCK,
-            mock(com.quistock.ds_backend.repository.ErpProjectionLock.class));
+            mock(com.quistock.ds_backend.repository.ErpProjectionLock.class),
+            executions);
   }
 
   @Test
@@ -105,13 +109,14 @@ class FlowServiceTest {
     when(products.findProductById(product.id(), SCOPE)).thenReturn(product);
     when(repository.comparableSales(product.id(), SCOPE))
         .thenReturn(java.util.Collections.nCopies(5, BigDecimal.TEN));
-    when(repository.insertAnalysis(any(), eq(SCOPE))).thenReturn(101L);
+    when(repository.insertAnalysis(any(), eq(SCOPE), eq(42L))).thenReturn(101L);
     when(repository.findById("101", SCOPE)).thenReturn(Optional.of(flow()));
     assertThat(service.analyzeProduct(product.id(), SCOPE)).isEqualTo(flow());
     var captor = ArgumentCaptor.forClass(FlowRepository.AnalysisSnapshot.class);
-    verify(repository).insertAnalysis(captor.capture(), eq(SCOPE));
+    verify(repository).insertAnalysis(captor.capture(), eq(SCOPE), eq(42L));
     assertThat(captor.getValue().flowType()).isEqualTo("MEDIUM");
     assertThat(captor.getValue().createdAt()).isEqualTo(TEST_CLOCK.instant());
+    verify(executions).complete(42L);
   }
 
   @Test
@@ -131,6 +136,17 @@ class FlowServiceTest {
         .isInstanceOf(InvalidRequestException.class);
     assertThatThrownBy(() -> service.listFlows(null, null, "invalid", SCOPE))
         .isInstanceOf(InvalidRequestException.class);
+  }
+
+  @Test
+  void shouldRecordFailedManualAnalysis() {
+    var product = product(10, 100, 20);
+    when(products.findProductById(product.id(), SCOPE)).thenReturn(product);
+    when(repository.comparableSales(product.id(), SCOPE))
+        .thenThrow(new IllegalStateException("Failed"));
+    assertThatThrownBy(() -> service.analyzeProduct(product.id(), SCOPE)).hasMessage("Failed");
+    verify(executions).fail(42L);
+    org.mockito.Mockito.verify(executions, org.mockito.Mockito.never()).complete(42L);
   }
 
   private ProductDTO product(Integer sales, Integer stock, Integer expiration) {

@@ -157,14 +157,25 @@ class FlowControllerTest {
         .andExpect(jsonPath("$.error").value("ERP_UNAVAILABLE"));
   }
 
+  @Test
+  void shouldOnlyReadCurrentAnalysesOnLegacyLoginRoute() throws Exception {
+    FlowService service = mock(FlowService.class);
+    when(service.currentFlows(null, SCOPE)).thenReturn(List.of(flow()));
+    mockMvc(service)
+        .perform(
+            post("/flows/analyze-login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"login_id\":\"33ed01e2-813b-4b24-a0e2-29c11be24562\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].id").value("101"));
+    org.mockito.Mockito.verify(service).currentFlows(null, SCOPE);
+    org.mockito.Mockito.verifyNoMoreInteractions(service);
+  }
+
   private MockMvc mockMvc(FlowService flowService) {
     UserAccessGuard accessGuard = mock(UserAccessGuard.class);
     when(accessGuard.requireStoreScope(1001L, null)).thenReturn(SCOPE);
-    return MockMvcBuilders.standaloneSetup(
-            new FlowController(
-                flowService,
-                accessGuard,
-                mock(com.quistock.ds_backend.service.LoginAnalysisService.class)))
+    return MockMvcBuilders.standaloneSetup(new FlowController(flowService, accessGuard))
         .setCustomArgumentResolvers(
             new HandlerMethodArgumentResolver() {
               @Override
