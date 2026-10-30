@@ -457,9 +457,13 @@ Response 200:
 
 Classification is calculated per consolidated product/store using `sales_7d / 7`, without
 rounding stock or requiring historical daily sales. The peer group consists of active
-products in the same store, SQL category and normalized ERP unit of measure, with known
-`sales_7d`. It includes the analyzed product. The ERP `unidade_medida` is now persisted in
-`product.unit_of_measure`; legacy rows without a unit need a successful ERP synchronization.
+products in the same store and SQL category, with known `sales_7d`. It includes the analyzed
+product. Each SKU represents a fixed presentation: Leite 1L and Leite 500 mL are distinct
+products, and quantities count those product presentations. No conversion to liters, mass
+or another common measure is performed. Unit of measure is neither required nor used to
+select peers or determine analysis eligibility. ERP `unidade_medida` is accepted for payload
+compatibility but is not persisted or used by analysis. See
+[`docs/product-business-rules.md`](docs/product-business-rules.md).
 
 A minimum of five comparable products and known sales are required. Otherwise, the analysis
 is saved as `INSUFFICIENT_DATA`, with null `flow_type`; no action may be generated from it.
@@ -497,7 +501,7 @@ one product. Unauthorized/missing products return `404`.
 {
   "id":"101", "product_id":"PROD001:FIL001", "product_name":"Whole Milk 1L",
   "flow_type":"HIGH", "status":"ANALYZED",
-  "reason":"Sales speed compared with the same category, unit and store.",
+  "reason":"Sales speed compared with the same category and store.",
   "daily_sales_average":20.000000, "stock_coverage_days":2.500000,
   "expiration_days":10, "supplier_lead_time":3,
   "analysis_date":"2026-10-26T12:00:00Z", "risks":["STOCKOUT"],
