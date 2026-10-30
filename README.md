@@ -208,5 +208,12 @@ Self-profile editing, independent risks, action forms and role/status rules are 
 Auth and the AI repository are not modified. Consumers must no longer interpret HIGH/LOW
 as inventory risks. Apply Flyway V7 on existing databases, or use the complete updated
 `database/quistock-schema.sql` for a new empty database; do not execute both bootstrap and
-migration over the same schema. Resynchronize the ERP to populate units before analysis.
+migration over the same schema. Unit of measure is not required for synchronization or
+analysis; each SKU represents a fixed product presentation (for example, Leite 1L and
+Leite 500 mL are separate products). Peers are selected by category and store only.
+See [product business rules](docs/product-business-rules.md) before changing product
+quantities, ERP synchronization or sales classification. The historical V7 migration and
+bootstrap schema retain `product.unit_of_measure` for migration compatibility, but the
+application does not read or write that column. No new migration or unit backfill is needed
+for this correction; other V7 changes remain required.
 Order completion, receipt, cancellation and automatic promotion closure remain future work.
