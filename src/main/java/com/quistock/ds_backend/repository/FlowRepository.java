@@ -196,11 +196,11 @@ public class FlowRepository {
         JOIN product p ON p.id = target.product_id
         JOIN store s ON s.id = target.store_id
         JOIN product other ON other.category_id = p.category_id
-          AND other.unit_of_measure = p.unit_of_measure AND other.active = TRUE
+          AND other.active = TRUE
         JOIN product_store peer ON peer.product_id = other.id AND peer.store_id = s.id
         WHERE p.erp_id || ':' || s.erp_id = :publicId
           AND p.active = TRUE AND target.active = TRUE AND peer.active = TRUE
-          AND peer.sales_7d IS NOT NULL AND p.unit_of_measure IS NOT NULL
+          AND peer.sales_7d IS NOT NULL
         """
             + StoreScope.SQL,
         scope.parameters().addValue("publicId", publicId),
