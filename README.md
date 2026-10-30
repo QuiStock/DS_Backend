@@ -192,13 +192,19 @@ O Swagger não cria uma rota para expor tokens nem remove a autenticação das A
 Se o gateway remover um prefixo público, alinhe os headers encaminhados e o
 contexto da aplicação para que os URLs gerados pelo Swagger preservem esse prefixo.
 
-## Core contract 3.0.0
+## Core contract 3.1.0
 
 See [api-contract.md](api-contract.md) and `/swagger-ui/index.html` for the current contract.
-This version adds self-profile editing, login-triggered sales analysis, explicit current
-analyses, independent inventory risks, human action details and role/status enforcement.
-Web/Mobile must call `POST /flows/analyze-login` once after login (with a retry-stable UUID),
-read `/flows/current`, and connect existing action forms to `/actions/generate`.
+Sales analysis runs daily at **08:00 America/Sao_Paulo**, independently of login, against
+synchronized ERP data. Execution status is saved in `ml_execution` and results are linked
+through `product_analysis.ml_execution_id`. PostgreSQL coordination prevents duplicate
+scheduled processing across instances; failures preserve the previous results.
+The application must be running at 08:00; missed schedules are not replayed on startup.
+`ANALYSIS_SCHEDULE_ENABLED=false` disables the trigger. Keep the SQL pool at least 2
+connections (default 3) and grant the Core role access to `ml_execution` and its sequence.
+No new migration is needed. Web/Mobile read `/flows/current`; the deprecated
+`POST /flows/analyze-login` only reads results. Explicit manual `/flows/analyze` remains.
+Self-profile editing, independent risks, action forms and role/status rules are preserved.
 Auth and the AI repository are not modified. Consumers must no longer interpret HIGH/LOW
 as inventory risks. Apply Flyway V7 on existing databases, or use the complete updated
 `database/quistock-schema.sql` for a new empty database; do not execute both bootstrap and

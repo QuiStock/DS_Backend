@@ -1,7 +1,7 @@
 # QuiStock API Contract
 
-Version: 3.0.0
-Last updated: 2026-10-26
+Version: 3.1.0
+Last updated: 2026-10-30
 
 ## Version 3 migration notes
 
@@ -9,8 +9,9 @@ This is a breaking business-contract change: HIGH/MEDIUM/LOW now describe sales 
 not inventory risk. Use `risks` for alerts and action selection. The ML remains advisory;
 no route executes an order or promotion in the ERP.
 
-- After each successful login, Web/Mobile must call `POST /flows/analyze-login` with a new
-  `login_id` UUID. Reuse that UUID for retries; do not call it on token refresh.
+- Analyses run daily at **08:00 America/Sao_Paulo**, independently of login or refresh.
+  Clients must read `GET /flows/current`; no login-triggered processing is required.
+  The legacy `POST /flows/analyze-login` is deprecated and only reads current analyses.
 - Fetch `GET /flows/current` instead of choosing a historical analysis in the client.
 - An insufficient sample produces `status=INSUFFICIENT_DATA` and `flow_type=null`.
 - Employee action forms must send quantity/date or discount/period. HIGH alone does not
@@ -20,8 +21,8 @@ no route executes an order or promotion in the ERP.
 
 ## Web/Mobile integration checklist
 
-1. Keep the existing Auth login/session flow. After login and profile loading, generate
-   a UUID and call `/flows/analyze-login`; refresh must not trigger this request.
+1. Keep the existing Auth login/session flow. Read `/flows/current` after loading the
+   profile; neither login nor refresh needs to trigger analysis.
 2. Load `/products` and `/flows/current` with the authorized `store_id`; join using the
    exact composite product ID. Handle null flow_type/INSUFFICIENT_DATA explicitly.
 3. Use `risks` and current product expiration_days for alerts. Do not interpret HIGH as
@@ -504,25 +505,48 @@ one product. Unauthorized/missing products return `404`.
 }
 ```
 
-## 2.2 Analyze after login
+## 2.2 Daily scheduled analysis
 
-`POST /flows/analyze-login?store_id=17`
+The Core runs analysis daily at **08:00 America/Sao_Paulo** (11:00 UTC under the current
+UTC-03 offset). The job reads the synchronized SQL ERP snapshot for all active stores and
+products; it does not call Auth or require a user login. ERP synchronization keeps its own
+schedule. No new endpoint or request field is required.
 
-```json
-{"login_id":"eb1b9a34-9d93-4dd0-ae91-e06d93f9ddbd"}
-```
+- Enabled by default; `ANALYSIS_SCHEDULE_ENABLED=false` disables the scheduled trigger.
+- The application must be running at 08:00. This in-process scheduler does not wake a
+  sleeping service or replay a missed execution after restart. Use an always-running Core
+  deployment; this is not an external cloud scheduler.
+- A PostgreSQL transaction advisory lock prevents overlapping jobs across Core instances.
+  A completed daily execution for the same business date is reused across all instances.
+- Each attempt creates `ml_execution` with model version `SALES_PERCENTILES_V1_DAILY`.
+  The cutoff is the Sao Paulo execution date; window metadata covers seven calendar dates,
+  ending at cutoff. Actual input is the ERP aggregate `sales_7d`, not daily sales history.
+- Successful batches atomically save all `product_analysis` rows with `ml_execution_id`
+  and mark the execution `COMPLETED`. `INSUFFICIENT_DATA` remains a valid analysis outcome.
+- Processing failure rolls back every analysis in that batch, records `FAILED` when the
+  database is available, and leaves previous analyses accessible. There is no automatic
+  same-day retry. A later attempt may retry a failed date; a completed date is skipped.
+  Abrupt process termination can leave `STARTED`; it does not block a later attempt.
+- The existing ERP projection lock keeps the input stable during processing. Readers can
+  continue reading the last committed analyses. Processing has a 120-second transaction
+  timeout; waiting/coordination are separate from login requests.
+- The job holds one coordination connection plus one processing connection. Keep
+  `DB_POOL_MAX_SIZE` at least 2 (default 3), and budget connections across replicas.
+- The Core SQL role needs SELECT/INSERT/UPDATE on `ml_execution`, usage on its identity
+  sequence, and its existing analysis/product permissions. Auth needs no new grants.
+  No new SQL table, column or migration is required. Historical rows remain unchanged.
 
-Returns `200` with the current analyses for the permitted scope. `store_id` is optional;
-without it all authorized active stores are processed. The client generates one UUID after
-successful login and reuses it on retries. Refreshing an access token does not trigger
-analysis. Auth does not call Core automatically; Web/Mobile must wire this request.
+`POST /flows/analyze` remains an explicit manual operation. It also records an execution
+using model version `SALES_PERCENTILES_V1` and links its result; it does not consume the
+scheduled daily run. Users should not call it from login or refresh.
 
-Processing is transactional, with a 120-second transaction timeout. Analysis shares the ERP
-projection writer lock to avoid mixing data during synchronization. Stores are locked in
-stable ID order; repeated `(actor_id, login_id, store_id)` is not processed again. A failure
-rolls back both analyses and the retry marker. Concurrent different logins are serialized
-for overlapping stores. No periodic scheduler is enabled. A malformed/missing UUID returns
-`400`; an explicitly unauthorized store returns `403`.
+### Legacy login endpoint
+
+`POST /flows/analyze-login?store_id=17` still accepts the existing valid `login_id` UUID
+body and returns `200` with current analyses for the permitted scope, without writes or
+processing. The UUID no longer controls execution. Missing/invalid UUID returns `400`;
+an unauthorized store returns `403`. Switch consumers to `GET /flows/current`.
+Before the first analysis, current results can be empty; do not fabricate zeros or risks.
 
 ## 2.3 Current analyses and history
 

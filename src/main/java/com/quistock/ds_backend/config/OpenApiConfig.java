@@ -18,7 +18,7 @@ import org.springframework.context.annotation.Configuration;
     info =
         @Info(
             title = "QuiStock Core API",
-            version = "3.0.0",
+            version = "3.1.0",
             description =
                 "Operações de estoque, ações, perfis e chat. Use JWT Bearer OU o cookie"
                     + " access_token. Escritas autenticadas por cookie exigem X-XSRF-TOKEN obtido"

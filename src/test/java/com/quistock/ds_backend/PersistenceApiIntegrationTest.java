@@ -66,6 +66,15 @@ class PersistenceApiIntegrationTest {
   @Autowired private ObjectMapper objectMapper;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private com.quistock.ds_backend.service.ErpSyncService erpSyncService;
+  @Autowired private com.quistock.ds_backend.service.DailyAnalysisService dailyAnalysis;
+
+  @Autowired
+  private com.quistock.ds_backend.repository.AnalysisExecutionRepository analysisExecutions;
+
+  @Autowired private com.quistock.ds_backend.repository.ProductRepository analysisProducts;
+  @Autowired private com.quistock.ds_backend.service.FlowService analysisFlows;
+  @Autowired private com.quistock.ds_backend.repository.ErpProjectionLock projectionLock;
+  @Autowired private org.springframework.transaction.PlatformTransactionManager transactions;
 
   @DynamicPropertySource
   static void registerProperties(DynamicPropertyRegistry registry) {
@@ -75,6 +84,7 @@ class PersistenceApiIntegrationTest {
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("spring.datasource.driver-class-name", POSTGRES::getDriverClassName);
     registry.add("spring.flyway.enabled", () -> true);
+    registry.add("spring.datasource.hikari.maximum-pool-size", () -> 6);
     registry.add(
         "server.servlet.context-path", () -> System.getProperty("routing.test.context", ""));
     registry.add("auth.jwt.issuer", () -> TEST_ISSUER);
@@ -136,9 +146,10 @@ class PersistenceApiIntegrationTest {
     assertRequestWithInvalidTokenIsUnauthorized();
     assertRequestWithInvalidClaimsIsUnauthorized();
     JsonNode apiDocs = get("/v3/api-docs", 200);
-    assertThat(apiDocs.path("info").path("version").asString()).isEqualTo("3.0.0");
+    assertThat(apiDocs.path("info").path("version").asString()).isEqualTo("3.1.0");
     assertThat(apiDocs.path("paths").has("/flows/current")).isTrue();
     assertThat(apiDocs.path("paths").has("/flows/analyze-login")).isTrue();
+    assertThat(apiDocs.at("/paths/~1flows~1analyze-login/post/deprecated").asBoolean()).isTrue();
     assertThat(apiDocs.path("paths").path("/profile").has("patch")).isTrue();
     seedAuthenticatedUser();
     ERP_RESPONSE.set(initialErpPayload());
@@ -276,12 +287,14 @@ class PersistenceApiIntegrationTest {
         .isEqualByComparingTo("15");
     postAs("/actions/generate", orderBody.replace(highFlowId, newerHighFlowId), 201, employeeNorth);
     String loginBody = "{\"login_id\":\"33ed01e2-813b-4b24-a0e2-29c11be24562\"}";
-    post("/flows/analyze-login", loginBody, 200);
     Integer analysisCount =
         jdbc.queryForObject("SELECT COUNT(*) FROM product_analysis", Integer.class);
     post("/flows/analyze-login", loginBody, 200);
+    post("/flows/analyze-login", loginBody, 200);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM product_analysis", Integer.class))
         .isEqualTo(analysisCount);
+    assertScheduledAnalysisPersistenceAndConcurrency();
+    assertScheduledAnalysisRollbackAndRetry();
     JsonNode current = get("/flows/current", 200);
     assertThat(current.size()).isEqualTo(15);
     assertThat(current.get(0).path("is_current").asBoolean()).isTrue();
@@ -315,6 +328,98 @@ class PersistenceApiIntegrationTest {
     assertThatThrownBy(erpSyncService::syncNow).isInstanceOf(IllegalStateException.class);
     assertThat(erpSyncService.hasCompletedSync()).isTrue();
     assertThat(get("/products", 200).size()).isEqualTo(1);
+  }
+
+  private void assertScheduledAnalysisPersistenceAndConcurrency() throws Exception {
+    try (var blocker = jdbc.getDataSource().getConnection()) {
+      blocker.setAutoCommit(false);
+      try (var statement = blocker.createStatement()) {
+        statement.execute("SELECT pg_advisory_xact_lock(74192001)");
+      }
+      var running = java.util.concurrent.CompletableFuture.supplyAsync(dailyAnalysis::runDaily);
+      try {
+        org.awaitility.Awaitility.await()
+            .atMost(java.time.Duration.ofSeconds(10))
+            .until(
+                () ->
+                    jdbc.queryForObject(
+                            "SELECT COUNT(*) FROM ml_execution WHERE model_version = 'SALES_PERCENTILES_V1_DAILY' AND status = 'STARTED'",
+                            Integer.class)
+                        == 1);
+        assertThat(dailyAnalysis.runDaily()).isFalse();
+      } finally {
+        blocker.rollback();
+      }
+      assertThat(running.get(20, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+    }
+    assertThat(dailyAnalysis.runDaily()).isFalse();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM product_analysis pa JOIN ml_execution me ON me.id = pa.ml_execution_id WHERE me.model_version = 'SALES_PERCENTILES_V1_DAILY' AND me.status = 'COMPLETED'",
+                Integer.class))
+        .isEqualTo(15);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM product_analysis WHERE ml_execution_id IS NULL",
+                Integer.class))
+        .isZero();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM ml_execution WHERE model_version = 'SALES_PERCENTILES_V1_DAILY'",
+                Integer.class))
+        .isEqualTo(1);
+  }
+
+  private void assertScheduledAnalysisRollbackAndRetry() {
+    int before = jdbc.queryForObject("SELECT COUNT(*) FROM product_analysis", Integer.class);
+    var nextDay =
+        java.time.Clock.offset(
+            java.time.Clock.system(java.time.ZoneId.of("America/Sao_Paulo")),
+            java.time.Duration.ofDays(1));
+    var failedFlows = org.mockito.Mockito.mock(com.quistock.ds_backend.service.FlowService.class);
+    org.mockito.Mockito.when(
+            failedFlows.analyze(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyLong()))
+        .thenAnswer(
+            invocation -> {
+              analysisFlows.analyze(
+                  invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2));
+              throw new IllegalStateException("Simulated failure after writing an analysis");
+            });
+    var failing =
+        new com.quistock.ds_backend.service.DailyAnalysisService(
+            analysisExecutions,
+            analysisProducts,
+            failedFlows,
+            projectionLock,
+            nextDay,
+            transactions);
+    assertThatThrownBy(failing::runDaily).hasMessageContaining("Simulated failure");
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM product_analysis", Integer.class))
+        .isEqualTo(before);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM ml_execution WHERE status = 'FAILED'", Integer.class))
+        .isEqualTo(1);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM product_analysis pa JOIN ml_execution me ON me.id = pa.ml_execution_id WHERE me.status = 'FAILED'",
+                Integer.class))
+        .isZero();
+    var retry =
+        new com.quistock.ds_backend.service.DailyAnalysisService(
+            analysisExecutions,
+            analysisProducts,
+            analysisFlows,
+            projectionLock,
+            nextDay,
+            transactions);
+    assertThat(retry.runDaily()).isTrue();
+    assertThat(retry.runDaily()).isFalse();
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM product_analysis", Integer.class))
+        .isEqualTo(before + 15);
   }
 
   private void seedComparableProducts() {
