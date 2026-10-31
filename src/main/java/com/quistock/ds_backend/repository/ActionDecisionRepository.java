@@ -1,8 +1,8 @@
 package com.quistock.ds_backend.repository;
 
+import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import java.util.Map;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -12,10 +12,10 @@ class ActionDecisionRepository {
   private static final String APPROVED = "APPROVED";
   private static final String REJECTED = "REJECTED";
 
-  private final NamedParameterJdbcTemplate jdbc;
+  private final EntityManager entityManager;
 
-  ActionDecisionRepository(NamedParameterJdbcTemplate jdbc) {
-    this.jdbc = jdbc;
+  ActionDecisionRepository(EntityManager entityManager) {
+    this.entityManager = entityManager;
   }
 
   void updateTriageIfNeeded(long suggestionId, String status, long employeeId) {
@@ -39,7 +39,8 @@ class ActionDecisionRepository {
   }
 
   private void upsertTriage(long suggestionId, String action, long employeeId) {
-    jdbc.update(
+    JpaNativeQuery.update(
+        entityManager,
         """
         INSERT INTO suggestion_triage
           (suggestion_id, employee_id, last_action, forwarded_at, updated_at)
@@ -48,15 +49,10 @@ class ActionDecisionRepository {
            CASE WHEN :action = 'FORWARD' THEN CURRENT_TIMESTAMP ELSE NULL END,
            CURRENT_TIMESTAMP)
         ON CONFLICT (suggestion_id) DO UPDATE SET
-          employee_id = EXCLUDED.employee_id,
-          last_action = EXCLUDED.last_action,
-          forwarded_at = EXCLUDED.forwarded_at,
-          updated_at = CURRENT_TIMESTAMP
+          employee_id = EXCLUDED.employee_id, last_action = EXCLUDED.last_action,
+          forwarded_at = EXCLUDED.forwarded_at, updated_at = CURRENT_TIMESTAMP
         """,
-        new MapSqlParameterSource()
-            .addValue("suggestionId", suggestionId)
-            .addValue("employeeId", employeeId)
-            .addValue("action", action));
+        Map.of("suggestionId", suggestionId, "employeeId", employeeId, "action", action));
   }
 
   private void upsertDecision(
@@ -68,7 +64,8 @@ class ActionDecisionRepository {
       long managerId) {
     String decision = APPROVED.equals(status) ? "APPROVE" : "REJECT";
     boolean rejected = REJECTED.equals(status);
-    jdbc.update(
+    JpaNativeQuery.update(
+        entityManager,
         """
         INSERT INTO suggestion_decision (
           suggestion_id, manager_id, decision, final_promotion_valid_from,
@@ -78,22 +75,27 @@ class ActionDecisionRepository {
           :validFrom, :validUntil, :justification, CURRENT_TIMESTAMP
         )
         ON CONFLICT (suggestion_id) DO UPDATE SET
-          manager_id = EXCLUDED.manager_id,
-          decision = EXCLUDED.decision,
+          manager_id = EXCLUDED.manager_id, decision = EXCLUDED.decision,
           final_promotion_valid_from = EXCLUDED.final_promotion_valid_from,
           final_promotion_valid_until = EXCLUDED.final_promotion_valid_until,
-          justification = EXCLUDED.justification,
-          decided_at = CURRENT_TIMESTAMP
+          justification = EXCLUDED.justification, decided_at = CURRENT_TIMESTAMP
         """,
-        new MapSqlParameterSource()
-            .addValue("suggestionId", suggestionId)
-            .addValue("managerId", managerId)
-            .addValue("decision", decision)
-            .addValue("validFrom", rejected ? null : validFrom)
-            .addValue("validUntil", rejected ? null : validUntil)
-            .addValue("justification", justification));
+        JpaNativeQuery.parameters(
+            "suggestionId",
+            suggestionId,
+            "managerId",
+            managerId,
+            "decision",
+            decision,
+            "validFrom",
+            rejected ? null : validFrom,
+            "validUntil",
+            rejected ? null : validUntil,
+            "justification",
+            justification));
     if (!rejected) {
-      jdbc.update(
+      JpaNativeQuery.update(
+          entityManager,
           """
           UPDATE suggestion_decision sd SET
             final_batch_count = sg.current_batch_count,
@@ -101,7 +103,7 @@ class ActionDecisionRepository {
             final_promotional_price = sg.promotional_price
           FROM suggestion sg WHERE sd.suggestion_id = sg.id AND sg.id = :id
           """,
-          java.util.Map.of("id", suggestionId));
+          Map.of("id", suggestionId));
     }
   }
 }

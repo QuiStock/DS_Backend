@@ -1,16 +1,14 @@
 package com.quistock.ds_backend.repository;
 
 import com.quistock.ds_backend.model.dto.ProductDTO;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import jakarta.persistence.EntityManager;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -43,8 +41,7 @@ public class ProductRepository {
       WHERE ps.active = TRUE
         AND p.active = TRUE
         AND s.status = 'ACTIVE'
-        AND (:scopeStoreId IS NULL OR s.id = :scopeStoreId)
-        AND (:scopeRegionId IS NULL OR s.region_id = :scopeRegionId)
+        /*STORE_SCOPE*/
         AND (CAST(:productErpId AS text) IS NULL OR p.erp_id = :productErpId)
         AND (CAST(:storeErpId AS text) IS NULL OR s.erp_id = :storeErpId)
         AND (CAST(:branch AS text) IS NULL OR s.name = :branch OR s.erp_id = :branch)
@@ -58,25 +55,23 @@ public class ProductRepository {
       ORDER BY p.name, s.name
       """;
 
-  private final NamedParameterJdbcTemplate jdbc;
+  private final EntityManager entityManager;
   private final Clock clock;
 
-  public ProductRepository(NamedParameterJdbcTemplate jdbc, Clock clock) {
-    this.jdbc = jdbc;
+  public ProductRepository(EntityManager entityManager, Clock clock) {
+    this.entityManager = entityManager;
     this.clock = clock;
   }
 
   public List<ProductDTO> findAll(
       String branch, String category, Boolean status, StoreScope scope) {
-    MapSqlParameterSource parameters =
-        scope
-            .parameters()
-            .addValue("branch", branch)
-            .addValue("category", category)
-            .addValue("status", status)
-            .addValue("productErpId", null)
-            .addValue("storeErpId", null);
-    return jdbc.query(PRODUCT_QUERY, parameters, productRowMapper());
+    Map<String, Object> parameters = new HashMap<>(scope.parameters());
+    parameters.put("branch", branch);
+    parameters.put("category", category);
+    parameters.put("status", status);
+    parameters.put("productErpId", null);
+    parameters.put("storeErpId", null);
+    return findProducts(parameters, scope);
   }
 
   public Optional<ProductDTO> findByPublicId(String publicId, StoreScope scope) {
@@ -84,34 +79,36 @@ public class ProductRepository {
     if (key == null) {
       return Optional.empty();
     }
-    MapSqlParameterSource parameters =
-        scope
-            .parameters()
-            .addValue("branch", null)
-            .addValue("category", null)
-            .addValue("status", null)
-            .addValue("productErpId", key.productErpId())
-            .addValue("storeErpId", key.storeErpId());
-    return jdbc.query(PRODUCT_QUERY, parameters, productRowMapper()).stream().findFirst();
+    Map<String, Object> parameters = new HashMap<>(scope.parameters());
+    parameters.put("branch", null);
+    parameters.put("category", null);
+    parameters.put("status", null);
+    parameters.put("productErpId", key.productErpId());
+    parameters.put("storeErpId", key.storeErpId());
+    return findProducts(parameters, scope).stream().findFirst();
   }
 
   public boolean hasSnapshot() {
-    Integer count =
-        jdbc.queryForObject(
-            "SELECT COUNT(*) FROM product_store WHERE active = TRUE",
-            new MapSqlParameterSource(),
-            Integer.class);
-    return count != null && count > 0;
+    Map<String, Object> row =
+        JpaNativeQuery.rows(
+                entityManager,
+                "SELECT COUNT(*) AS count FROM product_store WHERE active = TRUE",
+                Map.of())
+            .getFirst();
+    return JpaNativeQuery.longValue(row, "count") > 0;
   }
 
-  private RowMapper<ProductDTO> productRowMapper() {
-    return (resultSet, rowNumber) -> toProduct(resultSet);
+  private List<ProductDTO> findProducts(Map<String, Object> parameters, StoreScope scope) {
+    String query = PRODUCT_QUERY.replace("/*STORE_SCOPE*/", scope.sql());
+    return JpaNativeQuery.rows(entityManager, query, parameters).stream()
+        .map(this::toProduct)
+        .toList();
   }
 
-  private ProductDTO toProduct(ResultSet resultSet) throws SQLException {
-    String productErpId = resultSet.getString("product_erp_id");
-    String storeErpId = resultSet.getString("store_erp_id");
-    LocalDate nearestExpiration = resultSet.getObject("nearest_expiration_date", LocalDate.class);
+  private ProductDTO toProduct(Map<String, Object> row) {
+    String productErpId = JpaNativeQuery.string(row, "product_erp_id");
+    String storeErpId = JpaNativeQuery.string(row, "store_erp_id");
+    LocalDate nearestExpiration = JpaNativeQuery.date(row, "nearest_expiration_date");
     Integer expirationDays =
         nearestExpiration == null
             ? null
@@ -119,22 +116,20 @@ public class ProductRepository {
 
     return new ProductDTO(
         productErpId + ":" + storeErpId,
-        resultSet.getString("sku"),
-        resultSet.getString("product_name"),
-        resultSet.getString("category_name"),
-        preserveWholeQuantity(resultSet.getBigDecimal("current_stock")),
-        preserveWholeQuantity(resultSet.getBigDecimal("minimum_stock_quantity")),
-        preserveWholeQuantity(resultSet.getBigDecimal("sales_7d")),
-        preserveWholeQuantity(resultSet.getBigDecimal("sales_30d")),
+        JpaNativeQuery.string(row, "sku"),
+        JpaNativeQuery.string(row, "product_name"),
+        JpaNativeQuery.string(row, "category_name"),
+        preserveWholeQuantity(JpaNativeQuery.decimal(row, "current_stock")),
+        preserveWholeQuantity(JpaNativeQuery.decimal(row, "minimum_stock_quantity")),
+        preserveWholeQuantity(JpaNativeQuery.decimal(row, "sales_7d")),
+        preserveWholeQuantity(JpaNativeQuery.decimal(row, "sales_30d")),
         expirationDays,
-        resultSet.getObject("supplier_lead_time_days", Integer.class),
-        resultSet.getBigDecimal("sale_price"),
-        resultSet.getBigDecimal("unit_cost"),
-        resultSet.getTimestamp("last_restock_at") == null
-            ? null
-            : resultSet.getTimestamp("last_restock_at").toInstant(),
-        resultSet.getBigDecimal("current_stock").signum() > 0,
-        resultSet.getString("store_name"));
+        JpaNativeQuery.intValue(row, "supplier_lead_time_days"),
+        JpaNativeQuery.decimal(row, "sale_price"),
+        JpaNativeQuery.decimal(row, "unit_cost"),
+        JpaNativeQuery.instant(row, "last_restock_at"),
+        JpaNativeQuery.decimal(row, "current_stock").signum() > 0,
+        JpaNativeQuery.string(row, "store_name"));
   }
 
   private ProductKey parsePublicId(String publicId) {

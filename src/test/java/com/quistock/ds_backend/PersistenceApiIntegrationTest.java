@@ -157,8 +157,17 @@ class PersistenceApiIntegrationTest {
     JsonNode products = get("/products", 200);
     assertThat(products.size()).isEqualTo(3);
     assertThat(product("SKU-HIGH:STORE-1").path("current_stock").asInt()).isEqualTo(8);
+    assertThat(products.get(0).path("name").asString()).isEqualTo("Juice");
+    assertThat(products.get(1).path("name").asString()).isEqualTo("Milk");
+    assertThat(get("/products?category=Dairy", 200).size()).isEqualTo(1);
+    assertThat(get("/products?branch=STORE-1", 200).size()).isEqualTo(2);
+    assertThat(get("/products?status=true", 200).size()).isEqualTo(3);
+    assertThat(get("/products?status=false", 200).size()).isZero();
     assertThat(get("/branches", 200).size()).isEqualTo(2);
-    assertThat(get("/branches", 200).get(0).path("store_id").isNumber()).isTrue();
+    JsonNode branches = get("/branches", 200);
+    assertThat(branches.get(0).path("store_id").isNumber()).isTrue();
+    assertThat(branches.get(0).path("name").asString()).isEqualTo("North Branch");
+    assertThat(branches.get(1).path("name").asString()).isEqualTo("South Branch");
     String replacementManagerId = assertUserManagementRoutes();
     assertCookieAuthenticationAndCsrf(replacementManagerId);
     assertThat(get("/products/SKU-HIGH:STORE-1", 200).path("id").asString())
@@ -186,6 +195,10 @@ class PersistenceApiIntegrationTest {
     String highFlowId = analyze("SKU-HIGH:STORE-1", "HIGH");
     String mediumFlowId = analyze("SKU-MEDIUM:STORE-1", "MEDIUM");
     String lowFlowId = analyze("SKU-LOW:South Branch", "LOW");
+    JsonNode highFlow = get("/flows?product_id=SKU-HIGH:STORE-1", 200).get(0);
+    assertThat(highFlow.path("product_id").asString()).isEqualTo("SKU-HIGH:STORE-1");
+    assertThat(highFlow.path("flow_type").asString()).isEqualTo("HIGH");
+    assertThat(highFlow.path("is_current").asBoolean()).isTrue();
     assertThat(
             post("/chat", "{\"message\":\"Which products need a promotion?\"}", 503)
                 .path("error")
@@ -218,6 +231,10 @@ class PersistenceApiIntegrationTest {
         employeeNorth);
     JsonNode order = postAs("/actions/generate", orderBody, 201, employeeNorth);
     assertThat(postAs("/actions/generate", orderBody, 201, employeeNorth)).isEqualTo(order);
+    assertThat(order.path("generated_actions").get(0).path("status").asString())
+        .isEqualTo("GENERATED");
+    assertThat(order.path("generated_actions").get(0).path("desired_order_date").asString())
+        .isEqualTo(LocalDate.now().plusDays(5).toString());
     String newerHighFlowId = analyze("SKU-HIGH:STORE-1", "HIGH");
     postAs("/actions/generate", orderBody.replace(highFlowId, newerHighFlowId), 409, employeeNorth);
     String promotionBody =
@@ -308,6 +325,22 @@ class PersistenceApiIntegrationTest {
                 .path("name")
                 .asString())
         .isEqualTo("Updated Employee");
+    Instant fixedProfileTimestamp = Instant.parse("2000-01-01T00:00:00Z");
+    jdbc.update(
+        "UPDATE user_account SET updated_at = ? WHERE id = ?",
+        java.time.OffsetDateTime.ofInstant(fixedProfileTimestamp, java.time.ZoneOffset.UTC),
+        1006L);
+    patchAs(
+        "/profile",
+        "{\"name\":\"Updated Employee\",\"profile_photo_url\":\"https://images.example.com/photo.jpg\"}",
+        200,
+        employeeNorth);
+    java.time.OffsetDateTime profileUpdatedAt =
+        jdbc.queryForObject(
+            "SELECT updated_at FROM user_account WHERE id = ?",
+            java.time.OffsetDateTime.class,
+            1006L);
+    assertThat(profileUpdatedAt.toInstant()).isAfter(fixedProfileTimestamp);
     patchAs("/profile", "{\"role\":\"ADMIN\"}", 400, employeeNorth);
     patchAs("/profile", "{\"profile_photo_url\":\"javascript:invalid\"}", 400, employeeNorth);
     patchAs("/profile", "{}", 400, employeeNorth);
@@ -343,7 +376,8 @@ class PersistenceApiIntegrationTest {
             .until(
                 () ->
                     jdbc.queryForObject(
-                            "SELECT COUNT(*) FROM ml_execution WHERE model_version = 'SALES_PERCENTILES_V1_DAILY' AND status = 'STARTED'",
+                            "SELECT COUNT(*) FROM ml_execution WHERE model_version = "
+                                + "'SALES_PERCENTILES_V1_DAILY' AND status = 'STARTED'",
                             Integer.class)
                         == 1);
         assertThat(dailyAnalysis.runDaily()).isFalse();
@@ -355,7 +389,9 @@ class PersistenceApiIntegrationTest {
     assertThat(dailyAnalysis.runDaily()).isFalse();
     assertThat(
             jdbc.queryForObject(
-                "SELECT COUNT(*) FROM product_analysis pa JOIN ml_execution me ON me.id = pa.ml_execution_id WHERE me.model_version = 'SALES_PERCENTILES_V1_DAILY' AND me.status = 'COMPLETED'",
+                "SELECT COUNT(*) FROM product_analysis pa JOIN ml_execution me "
+                    + "ON me.id = pa.ml_execution_id WHERE me.model_version = "
+                    + "'SALES_PERCENTILES_V1_DAILY' AND me.status = 'COMPLETED'",
                 Integer.class))
         .isEqualTo(15);
     assertThat(
@@ -405,7 +441,8 @@ class PersistenceApiIntegrationTest {
         .isEqualTo(1);
     assertThat(
             jdbc.queryForObject(
-                "SELECT COUNT(*) FROM product_analysis pa JOIN ml_execution me ON me.id = pa.ml_execution_id WHERE me.status = 'FAILED'",
+                "SELECT COUNT(*) FROM product_analysis pa JOIN ml_execution me "
+                    + "ON me.id = pa.ml_execution_id WHERE me.status = 'FAILED'",
                 Integer.class))
         .isZero();
     var retry =

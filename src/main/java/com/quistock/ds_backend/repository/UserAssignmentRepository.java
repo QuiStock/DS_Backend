@@ -1,9 +1,9 @@
 package com.quistock.ds_backend.repository;
 
+import jakarta.persistence.EntityManager;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -11,69 +11,72 @@ public class UserAssignmentRepository {
   private static final String USER_ID_PARAMETER = "userId";
   private static final String STORE_ID_PARAMETER = "storeId";
 
-  private final NamedParameterJdbcTemplate jdbc;
+  private final EntityManager entityManager;
 
-  public UserAssignmentRepository(NamedParameterJdbcTemplate jdbc) {
-    this.jdbc = jdbc;
+  public UserAssignmentRepository(EntityManager entityManager) {
+    this.entityManager = entityManager;
   }
 
   public boolean storeIsActive(long storeId) {
-    Boolean exists =
-        jdbc.queryForObject(
-            "SELECT EXISTS (SELECT 1 FROM store WHERE id = :storeId AND status = 'ACTIVE')",
-            Map.of(STORE_ID_PARAMETER, storeId),
-            Boolean.class);
-    return Boolean.TRUE.equals(exists);
+    return Boolean.TRUE.equals(
+        entityManager
+            .createNativeQuery(
+                "SELECT EXISTS (SELECT 1 FROM store WHERE id = :storeId AND status = 'ACTIVE')")
+            .setParameter(STORE_ID_PARAMETER, storeId)
+            .getSingleResult());
   }
 
   public Optional<Long> findActiveStoreRegion(long storeId) {
-    return jdbc
-        .queryForList(
+    return JpaNativeQuery.rows(
+            entityManager,
             """
             SELECT s.region_id FROM store s
             JOIN region_type rt ON rt.id = s.region_id AND rt.active = TRUE
             WHERE s.id = :storeId AND s.status = 'ACTIVE'
             FOR SHARE OF s, rt
             """,
-            Map.of(STORE_ID_PARAMETER, storeId),
-            Long.class)
+            Map.of(STORE_ID_PARAMETER, storeId))
         .stream()
+        .map(row -> JpaNativeQuery.longValue(row, "region_id"))
         .findFirst();
   }
 
   public void lockUsers(long... userIds) {
-    jdbc.queryForList(
-        "SELECT id FROM user_account WHERE id IN (:userIds) ORDER BY id FOR UPDATE",
-        Map.of("userIds", Arrays.stream(userIds).boxed().toList()),
-        Long.class);
+    entityManager
+        .createNativeQuery(
+            "SELECT id FROM user_account WHERE id IN (:userIds) ORDER BY id FOR UPDATE")
+        .setParameter("userIds", Arrays.stream(userIds).boxed().toList())
+        .getResultList();
   }
 
   public boolean storeHasActiveEmployees(long storeId) {
-    Boolean exists =
-        jdbc.queryForObject(
-            """
-            SELECT EXISTS (
-              SELECT 1 FROM user_store us
-              JOIN user_account u ON u.id = us.user_id
-              JOIN role r ON r.id = u.role_id
-              WHERE us.store_id = :storeId AND us.active = TRUE
-                AND u.status = 'ACTIVE' AND r.code = 'EMPLOYEE'
-            )
-            """,
-            Map.of(STORE_ID_PARAMETER, storeId),
-            Boolean.class);
-    return Boolean.TRUE.equals(exists);
+    return Boolean.TRUE.equals(
+        entityManager
+            .createNativeQuery(
+                """
+                SELECT EXISTS (
+                  SELECT 1 FROM user_store us
+                  JOIN user_account u ON u.id = us.user_id
+                  JOIN role r ON r.id = u.role_id
+                  WHERE us.store_id = :storeId AND us.active = TRUE
+                    AND u.status = 'ACTIVE' AND r.code = 'EMPLOYEE'
+                )
+                """)
+            .setParameter(STORE_ID_PARAMETER, storeId)
+            .getSingleResult());
   }
 
   public void insertStoreAssignment(long userId, long storeId) {
-    jdbc.update(
+    JpaNativeQuery.update(
+        entityManager,
         "INSERT INTO user_store (user_id, store_id, active, assigned_at) "
             + "VALUES (:userId, :storeId, TRUE, CURRENT_TIMESTAMP)",
         Map.of(USER_ID_PARAMETER, userId, STORE_ID_PARAMETER, storeId));
   }
 
   public void closeStoreAssignments(long userId) {
-    jdbc.update(
+    JpaNativeQuery.update(
+        entityManager,
         """
         UPDATE user_store SET active = FALSE, unassigned_at = CURRENT_TIMESTAMP
         WHERE user_id = :userId AND active = TRUE

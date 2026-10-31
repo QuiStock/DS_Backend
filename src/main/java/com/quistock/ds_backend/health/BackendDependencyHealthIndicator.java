@@ -4,6 +4,8 @@ import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -13,11 +15,9 @@ import java.text.ParseException;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 
@@ -25,7 +25,7 @@ import org.springframework.web.util.DefaultUriBuilderFactory;
 public class BackendDependencyHealthIndicator extends DependencyHealthIndicator {
   private static final int RSA_PUBLIC_KEY_MIN_USABLE_BIT_LENGTH_THRESHOLD = 2048;
   private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(2);
-  private final JdbcTemplate sql;
+  private final EntityManager entityManager;
   private final URI jwksUri;
   private final Optional<URI> erpUri;
   private final boolean erpRequired;
@@ -36,15 +36,14 @@ public class BackendDependencyHealthIndicator extends DependencyHealthIndicator 
           .build();
 
   public BackendDependencyHealthIndicator(
-      DataSource dataSource,
+      EntityManager entityManager,
       @Value("${auth.jwt.jwk-set-uri}") String jwksUrl,
       @Value("${erp.api.base-url:}") String erpBaseUrl,
       @Value("${erp.api.products-path:/products}") String erpProductsPath,
       @Value("${app.health.erp-required:true}") boolean erpRequired,
       @Value("${app.health.timeout-ms:4000}") long timeoutMs) {
     super(timeoutMs);
-    this.sql = new JdbcTemplate(dataSource);
-    this.sql.setQueryTimeout(2);
+    this.entityManager = entityManager;
     this.jwksUri = URI.create(jwksUrl);
     this.erpRequired = erpRequired;
 
@@ -60,7 +59,9 @@ public class BackendDependencyHealthIndicator extends DependencyHealthIndicator 
   protected Health dependenciesHealth(AtomicReference<String> dependency)
       throws IOException, InterruptedException, ParseException {
     dependency.set("database");
-    sql.queryForObject("SELECT 1", Integer.class);
+    Query databaseCheck = entityManager.createNativeQuery("SELECT 1");
+    databaseCheck.setHint("jakarta.persistence.query.timeout", 2_000);
+    databaseCheck.getSingleResult();
     dependency.set("jwks");
     var jwks = get(jwksUri, HttpResponse.BodyHandlers.ofString());
     if (jwks.statusCode() != HttpStatus.OK.value()) {

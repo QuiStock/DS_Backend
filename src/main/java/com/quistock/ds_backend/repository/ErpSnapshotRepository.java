@@ -2,99 +2,81 @@ package com.quistock.ds_backend.repository;
 
 import com.quistock.ds_backend.model.dto.ErpBatchDTO;
 import com.quistock.ds_backend.util.ErpValueParser;
+import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
-import java.util.List;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import java.util.Map;
 import org.springframework.stereotype.Repository;
 
+/** PostgreSQL upserts preserve ERP identity and the existing snapshot deactivation rules. */
 @Repository
 class ErpSnapshotRepository {
   private static final String ERP_ID_PARAMETER = "erpId";
   private static final String SYNC_ID_PARAMETER = "syncId";
   private static final String NAME_PARAMETER = "name";
 
-  private final NamedParameterJdbcTemplate jdbc;
-  private final JdbcTemplate jdbcTemplate;
+  private final EntityManager entityManager;
   private final ErpProjectionLock projectionLock;
 
-  ErpSnapshotRepository(
-      NamedParameterJdbcTemplate jdbc,
-      JdbcTemplate jdbcTemplate,
-      ErpProjectionLock projectionLock) {
-    this.jdbc = jdbc;
-    this.jdbcTemplate = jdbcTemplate;
+  ErpSnapshotRepository(EntityManager entityManager, ErpProjectionLock projectionLock) {
+    this.entityManager = entityManager;
     this.projectionLock = projectionLock;
   }
 
   int activeProductCount() {
     projectionLock.acquire();
-    Integer count =
-        jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM product_store WHERE active = TRUE", Integer.class);
-    return count == null ? 0 : count;
+    Map<String, Object> row =
+        JpaNativeQuery.rows(
+                entityManager,
+                "SELECT COUNT(*) AS count FROM product_store WHERE active = TRUE",
+                Map.of())
+            .getFirst();
+    return JpaNativeQuery.longValue(row, "count").intValue();
   }
 
   long upsertRegion(String regionCode, long syncId) {
-    List<Long> ids =
-        jdbc.query(
-            """
-            INSERT INTO region_type (code, name, active)
-            VALUES (:code, :name, TRUE)
-            ON CONFLICT (code) DO UPDATE SET
-              name = EXCLUDED.name,
-              active = TRUE
-            RETURNING id
-            """,
-            new MapSqlParameterSource()
-                .addValue("code", regionCode)
-                .addValue(NAME_PARAMETER, regionCode),
-            (resultSet, rowNumber) -> resultSet.getLong("id"));
-    return ids.get(0);
+    return returnedId(
+        """
+        INSERT INTO region_type (code, name, active)
+        VALUES (:code, :name, TRUE)
+        ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, active = TRUE
+        RETURNING id
+        """,
+        JpaNativeQuery.parameters("code", regionCode, NAME_PARAMETER, regionCode));
   }
 
   long upsertStore(String erpId, String name, Long regionId, long syncId) {
-    List<Long> ids =
-        jdbc.query(
-            """
-            INSERT INTO store (erp_id, name, region_id, status, created_by_id, deactivated_at, last_sync_id)
-            VALUES (:erpId, :name, :regionId, 'ACTIVE', NULL, NULL, :syncId)
-            ON CONFLICT (erp_id) DO UPDATE SET
-              name = EXCLUDED.name,
-              region_id = COALESCE(EXCLUDED.region_id, store.region_id),
-              status = 'ACTIVE',
-              deactivated_at = NULL,
-              last_sync_id = EXCLUDED.last_sync_id
-            RETURNING id
-            """,
-            new MapSqlParameterSource()
-                .addValue(ERP_ID_PARAMETER, erpId)
-                .addValue(NAME_PARAMETER, name)
-                .addValue("regionId", regionId)
-                .addValue(SYNC_ID_PARAMETER, syncId),
-            (resultSet, rowNumber) -> resultSet.getLong("id"));
-    return ids.get(0);
+    return returnedId(
+        """
+        INSERT INTO store (erp_id, name, region_id, status, created_by_id, deactivated_at, last_sync_id)
+        VALUES (:erpId, :name, :regionId, 'ACTIVE', NULL, NULL, :syncId)
+        ON CONFLICT (erp_id) DO UPDATE SET
+          name = EXCLUDED.name,
+          region_id = COALESCE(EXCLUDED.region_id, store.region_id),
+          status = 'ACTIVE', deactivated_at = NULL, last_sync_id = EXCLUDED.last_sync_id
+        RETURNING id
+        """,
+        JpaNativeQuery.parameters(
+            ERP_ID_PARAMETER,
+            erpId,
+            NAME_PARAMETER,
+            name,
+            "regionId",
+            regionId,
+            SYNC_ID_PARAMETER,
+            syncId));
   }
 
   long upsertCategory(String erpId, String name, long syncId) {
-    List<Long> ids =
-        jdbc.query(
-            """
-            INSERT INTO category (erp_id, name, active, last_sync_id)
-            VALUES (:erpId, :name, TRUE, :syncId)
-            ON CONFLICT (erp_id) DO UPDATE SET
-              name = EXCLUDED.name,
-              active = TRUE,
-              last_sync_id = EXCLUDED.last_sync_id
-            RETURNING id
-            """,
-            new MapSqlParameterSource()
-                .addValue(ERP_ID_PARAMETER, erpId)
-                .addValue(NAME_PARAMETER, name)
-                .addValue(SYNC_ID_PARAMETER, syncId),
-            (resultSet, rowNumber) -> resultSet.getLong("id"));
-    return ids.get(0);
+    return returnedId(
+        """
+        INSERT INTO category (erp_id, name, active, last_sync_id)
+        VALUES (:erpId, :name, TRUE, :syncId)
+        ON CONFLICT (erp_id) DO UPDATE SET
+          name = EXCLUDED.name, active = TRUE, last_sync_id = EXCLUDED.last_sync_id
+        RETURNING id
+        """,
+        JpaNativeQuery.parameters(
+            ERP_ID_PARAMETER, erpId, NAME_PARAMETER, name, SYNC_ID_PARAMETER, syncId));
   }
 
   long upsertProduct(
@@ -104,32 +86,32 @@ class ErpSnapshotRepository {
       BigDecimal salePrice,
       BigDecimal minimumStock,
       long syncId) {
-    List<Long> ids =
-        jdbc.query(
-            """
-            INSERT INTO product
-              (erp_id, sku, category_id, name, sale_price, minimum_stock_quantity, active, last_sync_id)
-            VALUES (:erpId, :sku, :categoryId, :name, :salePrice, :minimumStock, TRUE, :syncId)
-            ON CONFLICT (erp_id) DO UPDATE SET
-              sku = EXCLUDED.sku,
-              category_id = EXCLUDED.category_id,
-              name = EXCLUDED.name,
-              sale_price = EXCLUDED.sale_price,
-              minimum_stock_quantity = EXCLUDED.minimum_stock_quantity,
-              active = TRUE,
-              last_sync_id = EXCLUDED.last_sync_id
-            RETURNING id
-            """,
-            new MapSqlParameterSource()
-                .addValue(ERP_ID_PARAMETER, erpId)
-                .addValue("sku", erpId)
-                .addValue("categoryId", categoryId)
-                .addValue(NAME_PARAMETER, name)
-                .addValue("salePrice", salePrice)
-                .addValue("minimumStock", minimumStock)
-                .addValue(SYNC_ID_PARAMETER, syncId),
-            (resultSet, rowNumber) -> resultSet.getLong("id"));
-    return ids.get(0);
+    return returnedId(
+        """
+        INSERT INTO product
+          (erp_id, sku, category_id, name, sale_price, minimum_stock_quantity, active, last_sync_id)
+        VALUES (:erpId, :sku, :categoryId, :name, :salePrice, :minimumStock, TRUE, :syncId)
+        ON CONFLICT (erp_id) DO UPDATE SET
+          sku = EXCLUDED.sku, category_id = EXCLUDED.category_id, name = EXCLUDED.name,
+          sale_price = EXCLUDED.sale_price, minimum_stock_quantity = EXCLUDED.minimum_stock_quantity,
+          active = TRUE, last_sync_id = EXCLUDED.last_sync_id
+        RETURNING id
+        """,
+        JpaNativeQuery.parameters(
+            ERP_ID_PARAMETER,
+            erpId,
+            "sku",
+            erpId,
+            "categoryId",
+            categoryId,
+            NAME_PARAMETER,
+            name,
+            "salePrice",
+            salePrice,
+            "minimumStock",
+            minimumStock,
+            SYNC_ID_PARAMETER,
+            syncId));
   }
 
   void upsertBatch(String erpId, ErpBatchDTO batch, long productId, long storeId, long syncId) {
@@ -146,7 +128,8 @@ class ErpSnapshotRepository {
     String qualityCertificate =
         batch.qualityCertificate() == null ? null : batch.qualityCertificate().toString();
 
-    jdbc.update(
+    JpaNativeQuery.update(
+        entityManager,
         """
         INSERT INTO batch (
           erp_id, batch_number, product_id, store_id, expiration_date, entry_date,
@@ -156,36 +139,41 @@ class ErpSnapshotRepository {
           :salePrice, :unitCost, :balance, :qualityCertificate, TRUE, :syncId
         )
         ON CONFLICT (erp_id) DO UPDATE SET
-          batch_number = EXCLUDED.batch_number,
-          product_id = EXCLUDED.product_id,
-          store_id = EXCLUDED.store_id,
-          expiration_date = EXCLUDED.expiration_date,
-          entry_date = EXCLUDED.entry_date,
-          sale_price = EXCLUDED.sale_price,
-          unit_cost = EXCLUDED.unit_cost,
-          current_balance = EXCLUDED.current_balance,
-          quality_certificate = EXCLUDED.quality_certificate,
-          active = TRUE,
+          batch_number = EXCLUDED.batch_number, product_id = EXCLUDED.product_id,
+          store_id = EXCLUDED.store_id, expiration_date = EXCLUDED.expiration_date,
+          entry_date = EXCLUDED.entry_date, sale_price = EXCLUDED.sale_price,
+          unit_cost = EXCLUDED.unit_cost, current_balance = EXCLUDED.current_balance,
+          quality_certificate = EXCLUDED.quality_certificate, active = TRUE,
           last_sync_id = EXCLUDED.last_sync_id
         """,
-        new MapSqlParameterSource()
-            .addValue(ERP_ID_PARAMETER, erpId)
-            .addValue("batchNumber", batchNumber)
-            .addValue("productId", productId)
-            .addValue("storeId", storeId)
-            .addValue("expirationDate", ErpValueParser.toLocalDate(batch.expirationDate()))
-            .addValue(
-                "entryDate",
-                ErpIdentifiers.databaseTimestamp(ErpValueParser.toInstant(batch.entryDate())))
-            .addValue("salePrice", salePrice)
-            .addValue("unitCost", unitCost)
-            .addValue("balance", quantity)
-            .addValue("qualityCertificate", qualityCertificate)
-            .addValue(SYNC_ID_PARAMETER, syncId));
+        JpaNativeQuery.parameters(
+            ERP_ID_PARAMETER,
+            erpId,
+            "batchNumber",
+            batchNumber,
+            "productId",
+            productId,
+            "storeId",
+            storeId,
+            "expirationDate",
+            ErpValueParser.toLocalDate(batch.expirationDate()),
+            "entryDate",
+            ErpIdentifiers.databaseTimestamp(ErpValueParser.toInstant(batch.entryDate())),
+            "salePrice",
+            salePrice,
+            "unitCost",
+            unitCost,
+            "balance",
+            quantity,
+            "qualityCertificate",
+            qualityCertificate,
+            SYNC_ID_PARAMETER,
+            syncId));
   }
 
   void upsertProductStore(ErpProductStoreSnapshot snapshot) {
-    jdbc.update(
+    JpaNativeQuery.update(
+        entityManager,
         """
         INSERT INTO product_store (
           product_id, store_id, minimum_stock_quantity, supplier_lead_time_days,
@@ -197,70 +185,84 @@ class ErpSnapshotRepository {
         ON CONFLICT (product_id, store_id) DO UPDATE SET
           minimum_stock_quantity = EXCLUDED.minimum_stock_quantity,
           supplier_lead_time_days = EXCLUDED.supplier_lead_time_days,
-          sales_7d = EXCLUDED.sales_7d,
-          sales_30d = EXCLUDED.sales_30d,
-          sale_price = EXCLUDED.sale_price,
-          unit_cost = EXCLUDED.unit_cost,
-          last_restock_at = EXCLUDED.last_restock_at,
-          active = TRUE,
+          sales_7d = EXCLUDED.sales_7d, sales_30d = EXCLUDED.sales_30d,
+          sale_price = EXCLUDED.sale_price, unit_cost = EXCLUDED.unit_cost,
+          last_restock_at = EXCLUDED.last_restock_at, active = TRUE,
           last_sync_id = EXCLUDED.last_sync_id
         """,
-        new MapSqlParameterSource()
-            .addValue("productId", snapshot.productId())
-            .addValue("storeId", snapshot.storeId())
-            .addValue("minimumStock", snapshot.minimumStock())
-            .addValue("leadTime", snapshot.supplierLeadTime())
-            .addValue("sales7d", snapshot.sales7d())
-            .addValue("sales30d", snapshot.sales30d())
-            .addValue("salePrice", snapshot.salePrice())
-            .addValue("unitCost", snapshot.unitCost())
-            .addValue("lastRestock", ErpIdentifiers.databaseTimestamp(snapshot.lastRestock()))
-            .addValue(SYNC_ID_PARAMETER, snapshot.syncId()));
+        JpaNativeQuery.parameters(
+            "productId",
+            snapshot.productId(),
+            "storeId",
+            snapshot.storeId(),
+            "minimumStock",
+            snapshot.minimumStock(),
+            "leadTime",
+            snapshot.supplierLeadTime(),
+            "sales7d",
+            snapshot.sales7d(),
+            "sales30d",
+            snapshot.sales30d(),
+            "salePrice",
+            snapshot.salePrice(),
+            "unitCost",
+            snapshot.unitCost(),
+            "lastRestock",
+            ErpIdentifiers.databaseTimestamp(snapshot.lastRestock()),
+            SYNC_ID_PARAMETER,
+            snapshot.syncId()));
   }
 
   boolean batchExists(String erpId) {
-    Boolean exists =
-        jdbc.queryForObject(
-            "SELECT EXISTS (SELECT 1 FROM batch WHERE erp_id = :erpId)",
-            new MapSqlParameterSource(ERP_ID_PARAMETER, erpId),
-            Boolean.class);
-    return Boolean.TRUE.equals(exists);
+    return Boolean.TRUE.equals(
+        JpaNativeQuery.rows(
+                entityManager,
+                "SELECT EXISTS (SELECT 1 FROM batch WHERE erp_id = :erpId) AS exists",
+                Map.of(ERP_ID_PARAMETER, erpId))
+            .getFirst()
+            .get("exists"));
   }
 
   int deactivateMissing(long syncId) {
     int deactivatedBatches =
-        jdbc.update(
-            "UPDATE batch SET active = FALSE WHERE active = TRUE AND last_sync_id IS DISTINCT FROM"
-                + " :syncId",
-            new MapSqlParameterSource(SYNC_ID_PARAMETER, syncId));
+        JpaNativeQuery.update(
+            entityManager,
+            "UPDATE batch SET active = FALSE WHERE active = TRUE AND last_sync_id IS DISTINCT FROM :syncId",
+            Map.of(SYNC_ID_PARAMETER, syncId));
     int deactivatedProductsByStore =
-        jdbc.update(
-            "UPDATE product_store SET active = FALSE WHERE active = TRUE AND last_sync_id IS"
-                + " DISTINCT FROM :syncId",
-            new MapSqlParameterSource(SYNC_ID_PARAMETER, syncId));
+        JpaNativeQuery.update(
+            entityManager,
+            "UPDATE product_store SET active = FALSE WHERE active = TRUE AND last_sync_id IS DISTINCT FROM :syncId",
+            Map.of(SYNC_ID_PARAMETER, syncId));
     int deactivatedStores =
-        jdbc.update(
+        JpaNativeQuery.update(
+            entityManager,
             """
             UPDATE store SET status = 'INACTIVE', deactivated_at = CURRENT_TIMESTAMP
             WHERE status = 'ACTIVE' AND last_sync_id IS DISTINCT FROM :syncId
             """,
-            new MapSqlParameterSource(SYNC_ID_PARAMETER, syncId));
-    jdbc.update(
+            Map.of(SYNC_ID_PARAMETER, syncId));
+    JpaNativeQuery.update(
+        entityManager,
         """
-        UPDATE product p
-        SET active = EXISTS (
+        UPDATE product p SET active = EXISTS (
           SELECT 1 FROM product_store ps WHERE ps.product_id = p.id AND ps.active = TRUE
         )
         """,
-        new MapSqlParameterSource());
-    jdbc.update(
+        Map.of());
+    JpaNativeQuery.update(
+        entityManager,
         """
-        UPDATE category c
-        SET active = EXISTS (
+        UPDATE category c SET active = EXISTS (
           SELECT 1 FROM product p WHERE p.category_id = c.id AND p.active = TRUE
         )
         """,
-        new MapSqlParameterSource());
+        Map.of());
     return deactivatedBatches + deactivatedProductsByStore + deactivatedStores;
+  }
+
+  private long returnedId(String sql, Map<String, ?> parameters) {
+    return JpaNativeQuery.longValue(
+        JpaNativeQuery.rows(entityManager, sql, parameters).getFirst(), "id");
   }
 }

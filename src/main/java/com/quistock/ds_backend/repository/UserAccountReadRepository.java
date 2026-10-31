@@ -1,10 +1,10 @@
 package com.quistock.ds_backend.repository;
 
 import com.quistock.ds_backend.model.dto.UserDTO;
+import jakarta.persistence.EntityManager;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -31,45 +31,54 @@ public class UserAccountReadRepository {
         WHEN r.code = 'REGIONAL_MANAGER' THEN rma.region_id ELSE s.region_id END
       """;
 
-  private final NamedParameterJdbcTemplate jdbc;
+  private final EntityManager entityManager;
 
-  public UserAccountReadRepository(NamedParameterJdbcTemplate jdbc) {
-    this.jdbc = jdbc;
+  public UserAccountReadRepository(EntityManager entityManager) {
+    this.entityManager = entityManager;
   }
 
   public Optional<Actor> findActor(long id) {
-    List<Actor> result =
-        jdbc.query(
+    return JpaNativeQuery.rows(
+            entityManager,
             """
             SELECT u.id, u.status::text AS status, r.code AS role
             FROM user_account u JOIN role r ON r.id = u.role_id
             WHERE u.id = :id
             """,
-            Map.of("id", id),
-            (rs, row) -> new Actor(rs.getLong("id"), rs.getString("role"), rs.getString("status")));
-    return result.stream().findFirst();
+            Map.of("id", id))
+        .stream()
+        .map(
+            row ->
+                new Actor(
+                    JpaNativeQuery.longValue(row, "id"),
+                    JpaNativeQuery.string(row, "role"),
+                    JpaNativeQuery.string(row, "status")))
+        .findFirst();
   }
 
   public Optional<Long> findActiveStoreAssignment(long userId) {
-    return jdbc
-        .queryForList(
+    return JpaNativeQuery.rows(
+            entityManager,
             """
             SELECT us.store_id FROM user_store us
             JOIN store s ON s.id = us.store_id AND s.status = 'ACTIVE'
             WHERE us.user_id = :userId AND us.active = TRUE
             """,
-            Map.of("userId", userId),
-            Long.class)
+            Map.of("userId", userId))
         .stream()
+        .map(row -> JpaNativeQuery.longValue(row, "store_id"))
         .findFirst();
   }
 
   public Optional<UserDTO> findUser(long id) {
-    return findOne(USER_PROJECTION + " WHERE u.id = :id", Map.of("id", id));
+    return queryUsers(USER_PROJECTION + " WHERE u.id = :id", Map.of("id", id)).stream().findFirst();
   }
 
   public Optional<UserDTO> findManager(long id) {
-    return findOne(USER_PROJECTION + " WHERE u.id = :id AND r.code = 'MANAGER'", Map.of("id", id));
+    return queryUsers(
+            USER_PROJECTION + " WHERE u.id = :id AND r.code = 'MANAGER'", Map.of("id", id))
+        .stream()
+        .findFirst();
   }
 
   public Optional<UserDTO> findTeamMember(long id, long managerId) {
@@ -77,32 +86,33 @@ public class UserAccountReadRepository {
     if (storeId == null) {
       return Optional.empty();
     }
-    return findOne(
-        USER_PROJECTION + " WHERE u.id = :id AND r.code = 'EMPLOYEE' AND s.id = :storeId",
-        Map.of("id", id, "storeId", storeId));
+    return queryUsers(
+            USER_PROJECTION + " WHERE u.id = :id AND r.code = 'EMPLOYEE' AND s.id = :storeId",
+            Map.of("id", id, "storeId", storeId))
+        .stream()
+        .findFirst();
   }
 
   public List<UserDTO> findManagers(StoreScope scope) {
-    return jdbc.query(
+    return queryUsers(
         USER_PROJECTION
             + " WHERE r.code = 'MANAGER'"
-            + StoreScope.SQL
+            + scope.sql()
             + " ORDER BY LOWER(u.name), u.id",
-        scope.parameters(),
-        UserAccountReadRepository::mapUser);
+        scope.parameters());
   }
 
   public Optional<Long> findActiveRegionalAssignment(long userId) {
-    return jdbc
-        .queryForList(
+    return JpaNativeQuery.rows(
+            entityManager,
             """
             SELECT rma.region_id FROM region_manager_assignment rma
             JOIN region_type rt ON rt.id = rma.region_id AND rt.active = TRUE
             WHERE rma.user_id = :userId AND rma.active = TRUE
             """,
-            Map.of("userId", userId),
-            Long.class)
+            Map.of("userId", userId))
         .stream()
+        .map(row -> JpaNativeQuery.longValue(row, "region_id"))
         .findFirst();
   }
 
@@ -111,37 +121,16 @@ public class UserAccountReadRepository {
     if (storeId == null) {
       return List.of();
     }
-    return jdbc.query(
+    return queryUsers(
         USER_PROJECTION
             + " WHERE r.code = 'EMPLOYEE' AND s.id = :storeId ORDER BY LOWER(u.name), u.id",
-        Map.of("storeId", storeId),
-        UserAccountReadRepository::mapUser);
+        Map.of("storeId", storeId));
   }
 
-  private Optional<UserDTO> findOne(String sql, Map<String, ?> parameters) {
-    return jdbc.query(sql, parameters, UserAccountReadRepository::mapUser).stream().findFirst();
-  }
-
-  @SuppressWarnings("PMD.UnusedFormalParameter")
-  private static UserDTO mapUser(java.sql.ResultSet rs, int rowNumber)
-      throws java.sql.SQLException {
-    long storeIdValue = rs.getLong("store_id");
-    Long storeId = rs.wasNull() ? null : storeIdValue;
-    long regionIdValue = rs.getLong("region_id");
-    Long regionId = rs.wasNull() ? null : regionIdValue;
-    return new UserDTO(
-        Long.toString(rs.getLong("id")),
-        rs.getString("name"),
-        rs.getString("email"),
-        rs.getString("role"),
-        rs.getString("status"),
-        rs.getString("profile_photo_url"),
-        storeId,
-        rs.getString("store_code"),
-        rs.getString("store_name"),
-        regionId,
-        rs.getString("region_code"),
-        rs.getString("region_name"));
+  private List<UserDTO> queryUsers(String sql, Map<String, ?> parameters) {
+    return JpaNativeQuery.rows(entityManager, sql, parameters).stream()
+        .map(UserDTOMapper::map)
+        .toList();
   }
 
   public record Actor(long id, String role, String status) {}
