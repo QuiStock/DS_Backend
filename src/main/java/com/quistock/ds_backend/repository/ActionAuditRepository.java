@@ -1,10 +1,9 @@
 package com.quistock.ds_backend.repository;
 
+import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.Map;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -20,11 +19,11 @@ class ActionAuditRepository {
   private static final String PROMOTION_FROM_KEY = "promotion_valid_from";
   private static final String PROMOTION_UNTIL_KEY = "promotion_valid_until";
 
-  private final NamedParameterJdbcTemplate jdbc;
+  private final EntityManager entityManager;
   private final ObjectMapper objectMapper;
 
-  ActionAuditRepository(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
-    this.jdbc = jdbc;
+  ActionAuditRepository(EntityManager entityManager, ObjectMapper objectMapper) {
+    this.entityManager = entityManager;
     this.objectMapper = objectMapper;
   }
 
@@ -70,7 +69,8 @@ class ActionAuditRepository {
   }
 
   private void writeLog(long suggestionId, LogData log) {
-    jdbc.update(
+    JpaNativeQuery.update(
+        entityManager,
         """
         INSERT INTO suggestion_log (
           suggestion_id, user_id, event, recorded_status, batch_quantity,
@@ -88,16 +88,25 @@ class ActionAuditRepository {
              FROM suggestion WHERE id = :suggestionId), :reason, CURRENT_TIMESTAMP
         )
         """,
-        new MapSqlParameterSource()
-            .addValue("suggestionId", suggestionId)
-            .addValue("userId", log.userId())
-            .addValue("event", log.event())
-            .addValue("status", log.status())
-            .addValue("validFrom", log.validFrom())
-            .addValue("validUntil", log.validUntil())
-            .addValue("previousData", toJson(log.previousData()))
-            .addValue("newData", toJson(log.newData()))
-            .addValue("reason", log.reason()));
+        JpaNativeQuery.parameters(
+            "suggestionId",
+            suggestionId,
+            "userId",
+            log.userId(),
+            "event",
+            log.event(),
+            "status",
+            log.status(),
+            "validFrom",
+            log.validFrom(),
+            "validUntil",
+            log.validUntil(),
+            "previousData",
+            toJson(log.previousData()),
+            "newData",
+            toJson(log.newData()),
+            "reason",
+            log.reason()));
   }
 
   private String eventFor(String status) {

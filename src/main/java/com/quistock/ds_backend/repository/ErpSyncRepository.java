@@ -3,10 +3,10 @@ package com.quistock.ds_backend.repository;
 import com.quistock.ds_backend.model.dto.ErpBatchDTO;
 import java.time.Instant;
 import java.util.List;
-import org.springframework.stereotype.Repository;
+import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-@Repository
+@Component
 public class ErpSyncRepository {
   private final ErpSyncStateRepository stateRepository;
   private final ErpSnapshotProcessor snapshotProcessor;

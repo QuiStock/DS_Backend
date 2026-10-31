@@ -1,27 +1,32 @@
 package com.quistock.ds_backend.repository;
 
 import com.quistock.ds_backend.model.dto.RegionDTO;
+import jakarta.persistence.EntityManager;
 import java.util.List;
-import java.util.Map;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
 public class RegionRepository {
   private static final String NAME_COLUMN = "name";
 
-  private final NamedParameterJdbcTemplate jdbc;
+  private final EntityManager entityManager;
 
-  public RegionRepository(NamedParameterJdbcTemplate jdbc) {
-    this.jdbc = jdbc;
+  public RegionRepository(EntityManager entityManager) {
+    this.entityManager = entityManager;
   }
 
   public List<RegionDTO> findActiveRegions() {
-    return jdbc.query(
-        "SELECT id, code, name FROM region_type WHERE active = TRUE ORDER BY name, id",
-        Map.of(),
-        (rs, row) ->
-            new RegionDTO(
-                Long.toString(rs.getLong("id")), rs.getString("code"), rs.getString(NAME_COLUMN)));
+    return JpaNativeQuery.rows(
+            entityManager,
+            "SELECT id, code, name FROM region_type WHERE active = TRUE ORDER BY name, id",
+            java.util.Map.of())
+        .stream()
+        .map(
+            row ->
+                new RegionDTO(
+                    Long.toString(JpaNativeQuery.longValue(row, "id")),
+                    JpaNativeQuery.string(row, "code"),
+                    JpaNativeQuery.string(row, NAME_COLUMN)))
+        .toList();
   }
 }

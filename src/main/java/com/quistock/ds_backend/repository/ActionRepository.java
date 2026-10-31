@@ -8,14 +8,13 @@ import com.quistock.ds_backend.model.dto.ActionListItemDTO;
 import com.quistock.ds_backend.model.dto.ActionStatusResponse;
 import com.quistock.ds_backend.model.dto.FlowDTO;
 import com.quistock.ds_backend.model.dto.UpdateActionStatusRequest;
+import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,17 +24,17 @@ public class ActionRepository {
   private static final String GENERATED = "GENERATED";
   private static final String STATUS_PARAMETER = "status";
 
-  private final NamedParameterJdbcTemplate jdbc;
+  private final EntityManager entityManager;
   private final ActionReadRepository readRepository;
   private final ActionDecisionRepository decisionRepository;
   private final ActionAuditRepository auditRepository;
 
   public ActionRepository(
-      NamedParameterJdbcTemplate jdbc,
+      EntityManager entityManager,
       ActionReadRepository readRepository,
       ActionDecisionRepository decisionRepository,
       ActionAuditRepository auditRepository) {
-    this.jdbc = jdbc;
+    this.entityManager = entityManager;
     this.readRepository = readRepository;
     this.decisionRepository = decisionRepository;
     this.auditRepository = auditRepository;
@@ -53,25 +52,24 @@ public class ActionRepository {
     }
 
     readRepository.lockProductAndCheckPending(flowId, scope);
-    MapSqlParameterSource parameters =
-        scope
-            .parameters()
-            .addValue(FLOW_ID, flowId)
-            .addValue("actionType", actionType)
-            .addValue("origin", "EMPLOYEE")
-            .addValue(STATUS_PARAMETER, GENERATED)
-            .addValue("promotionValidFrom", promotionValidFrom)
-            .addValue("promotionValidUntil", promotionValidUntil)
-            .addValue("actorId", scope.actorId())
-            .addValue("quantity", details.quantity())
-            .addValue("desiredDate", details.desiredDate())
-            .addValue("discount", details.discount());
+    Map<String, Object> parameters = new HashMap<>(scope.parameters());
+    parameters.put(FLOW_ID, flowId);
+    parameters.put("actionType", actionType);
+    parameters.put("origin", "EMPLOYEE");
+    parameters.put(STATUS_PARAMETER, GENERATED);
+    parameters.put("promotionValidFrom", promotionValidFrom);
+    parameters.put("promotionValidUntil", promotionValidUntil);
+    parameters.put("actorId", scope.actorId());
+    parameters.put("quantity", details.quantity());
+    parameters.put("desiredDate", details.desiredDate());
+    parameters.put("discount", details.discount());
     if (readRepository.findSuggestionIdByFlow(flowId, actionType, scope) == null) {
       readRepository.rejectOtherPending(flowId, actionType, scope);
     }
     readRepository.requireCurrentAnalysis(flowId, scope);
-    List<Long> insertedIds =
-        jdbc.query(
+    List<Map<String, Object>> insertedIds =
+        JpaNativeQuery.rows(
+            entityManager,
             """
             INSERT INTO suggestion (
               product_analysis_id, store_id, product_id, "type", origin, status,
@@ -95,16 +93,15 @@ public class ActionRepository {
               ON ps.product_id = pa.product_id AND ps.store_id = pa.store_id
             WHERE pa.id = :flowId AND ps.active = TRUE
             """
-                + StoreScope.SQL
+                + scope.sql()
                 + " ON CONFLICT (product_analysis_id, type) WHERE product_analysis_id IS NOT NULL DO NOTHING"
                 + " RETURNING id",
-            parameters,
-            (resultSet, rowNumber) -> resultSet.getLong("id"));
+            parameters);
 
     Long suggestionId =
         insertedIds.isEmpty()
             ? readRepository.findSuggestionIdByFlow(flowId, actionType, scope)
-            : insertedIds.get(0);
+            : JpaNativeQuery.longValue(insertedIds.getFirst(), "id");
     if (suggestionId == null) {
       throw new FlowNotFoundException(flow.id());
     }
@@ -145,16 +142,19 @@ public class ActionRepository {
     }
 
     List<StoredSuggestion> rows =
-        jdbc.query(
-            """
+        JpaNativeQuery.rows(
+                entityManager,
+                """
             SELECT sg.id, sg.status::text AS status, sg."type"::text AS type,
                    sg.promotion_valid_from, sg.promotion_valid_until
             FROM suggestion sg JOIN store s ON s.id = sg.store_id WHERE sg.id = :id
             """
-                + StoreScope.SQL
-                + " FOR UPDATE OF sg",
-            scope.parameters().addValue("id", id),
-            (resultSet, rowNumber) -> toStoredSuggestion(resultSet));
+                    + scope.sql()
+                    + " FOR UPDATE OF sg",
+                parameters(scope, "id", id))
+            .stream()
+            .map(this::toStoredSuggestion)
+            .toList();
     if (rows.isEmpty()) {
       throw new ActionNotFoundException(actionId);
     }
@@ -221,7 +221,8 @@ public class ActionRepository {
       BigDecimal discount) {}
 
   private void updateStatusRow(long id, String status, LocalDate validFrom, LocalDate validUntil) {
-    jdbc.update(
+    JpaNativeQuery.update(
+        entityManager,
         """
         UPDATE suggestion
         SET status = CAST(:status AS suggestion_status),
@@ -230,20 +231,23 @@ public class ActionRepository {
             updated_at = CURRENT_TIMESTAMP
         WHERE id = :id
         """,
-        new MapSqlParameterSource()
-            .addValue(STATUS_PARAMETER, status)
-            .addValue("validFrom", validFrom)
-            .addValue("validUntil", validUntil)
-            .addValue("id", id));
+        JpaNativeQuery.parameters(
+            STATUS_PARAMETER, status, "validFrom", validFrom, "validUntil", validUntil, "id", id));
   }
 
-  private StoredSuggestion toStoredSuggestion(ResultSet resultSet) throws SQLException {
+  private StoredSuggestion toStoredSuggestion(Map<String, Object> row) {
     return new StoredSuggestion(
-        resultSet.getLong("id"),
-        resultSet.getString(STATUS_PARAMETER),
-        resultSet.getString("type"),
-        resultSet.getObject("promotion_valid_from", LocalDate.class),
-        resultSet.getObject("promotion_valid_until", LocalDate.class));
+        JpaNativeQuery.longValue(row, "id"),
+        JpaNativeQuery.string(row, STATUS_PARAMETER),
+        JpaNativeQuery.string(row, "type"),
+        JpaNativeQuery.date(row, "promotion_valid_from"),
+        JpaNativeQuery.date(row, "promotion_valid_until"));
+  }
+
+  private Map<String, Object> parameters(StoreScope scope, String name, Object value) {
+    Map<String, Object> parameters = new HashMap<>(scope.parameters());
+    parameters.put(name, value);
+    return parameters;
   }
 
   private Long parseId(String id) {

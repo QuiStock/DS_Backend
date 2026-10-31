@@ -1,18 +1,18 @@
 package com.quistock.ds_backend.repository;
 
-import org.springframework.jdbc.core.JdbcTemplate;
+import jakarta.persistence.EntityManager;
 import org.springframework.stereotype.Component;
 
 /** Transaction-scoped coordination shared by ERP snapshot writes and sales analysis. */
 @Component
 public class ErpProjectionLock {
-  private final JdbcTemplate jdbc;
+  private final EntityManager entityManager;
 
-  public ErpProjectionLock(JdbcTemplate jdbc) {
-    this.jdbc = jdbc;
+  public ErpProjectionLock(EntityManager entityManager) {
+    this.entityManager = entityManager;
   }
 
   public void acquire() {
-    jdbc.execute("SELECT pg_advisory_xact_lock(74192001)");
+    entityManager.createNativeQuery("SELECT pg_advisory_xact_lock(74192001)").getSingleResult();
   }
 }

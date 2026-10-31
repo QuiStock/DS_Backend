@@ -1,6 +1,7 @@
 package com.quistock.ds_backend.repository;
 
 import com.quistock.ds_backend.model.dto.FlowDTO;
+import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -8,9 +9,8 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -45,11 +45,11 @@ public class FlowRepository {
       LEFT JOIN flow_type_catalog ft ON ft.id = pa.flow_type_id
       """;
 
-  private final NamedParameterJdbcTemplate jdbc;
+  private final EntityManager entityManager;
   private final ObjectMapper objectMapper;
 
-  public FlowRepository(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
-    this.jdbc = jdbc;
+  public FlowRepository(EntityManager entityManager, ObjectMapper objectMapper) {
+    this.entityManager = entityManager;
     this.objectMapper = objectMapper;
   }
 
@@ -59,19 +59,19 @@ public class FlowRepository {
       return -1;
     }
 
-    jdbc.query(
+    Map<String, Object> parameters = new HashMap<>(scope.parameters());
+    parameters.put("productErpId", key.productErpId());
+    parameters.put("storeErpId", key.storeErpId());
+    JpaNativeQuery.rows(
+        entityManager,
         """
         SELECT ps.id FROM product_store ps JOIN product p ON p.id = ps.product_id
         JOIN store s ON s.id = ps.store_id
         WHERE p.erp_id = :productErpId AND s.erp_id = :storeErpId
         """
-            + StoreScope.SQL
+            + scope.sql()
             + " FOR UPDATE OF ps",
-        scope
-            .parameters()
-            .addValue("productErpId", key.productErpId())
-            .addValue("storeErpId", key.storeErpId()),
-        (row, index) -> row.getLong(1));
+        parameters);
     Map<String, Object> metrics = new HashMap<>();
     metrics.put("daily_sales_average", analysis.dailySalesAverage());
     metrics.put("stock_coverage_days", analysis.stockCoverageDays());
@@ -92,19 +92,15 @@ public class FlowRepository {
             "risks",
             analysis.risks());
 
-    MapSqlParameterSource parameters =
-        scope
-            .parameters()
-            .addValue("productErpId", key.productErpId())
-            .addValue("storeErpId", key.storeErpId())
-            .addValue("executionId", executionId)
-            .addValue("flowType", analysis.flowType())
-            .addValue("metrics", toJson(metrics))
-            .addValue("context", toJson(context))
-            .addValue("createdAt", OffsetDateTime.ofInstant(analysis.createdAt(), ZoneOffset.UTC));
+    parameters.put("executionId", executionId);
+    parameters.put("flowType", analysis.flowType());
+    parameters.put("metrics", toJson(metrics));
+    parameters.put("context", toJson(context));
+    parameters.put("createdAt", OffsetDateTime.ofInstant(analysis.createdAt(), ZoneOffset.UTC));
 
-    List<Long> ids =
-        jdbc.query(
+    List<Map<String, Object>> ids =
+        JpaNativeQuery.rows(
+            entityManager,
             """
             INSERT INTO product_analysis (
               ml_execution_id, store_id, product_id, flow_type_id, metrics, context, created_at
@@ -120,11 +116,10 @@ public class FlowRepository {
               AND ps.active = TRUE
               AND p.active = TRUE
             """
-                + StoreScope.SQL
+                + scope.sql()
                 + " RETURNING id",
-            parameters,
-            (resultSet, rowNumber) -> resultSet.getLong("id"));
-    return ids.isEmpty() ? -1 : ids.get(0);
+            parameters);
+    return ids.isEmpty() ? -1 : JpaNativeQuery.longValue(ids.get(0), "id");
   }
 
   public List<FlowDTO> findAll(String flowType, String productId, String status, StoreScope scope) {
@@ -132,28 +127,26 @@ public class FlowRepository {
     if (productId != null && key == null) {
       return List.of();
     }
-    MapSqlParameterSource parameters =
-        scope
-            .parameters()
-            .addValue("flowType", flowType)
-            .addValue("productErpId", key == null ? null : key.productErpId())
-            .addValue("storeErpId", key == null ? null : key.storeErpId());
+    Map<String, Object> parameters = new HashMap<>(scope.parameters());
+    parameters.put("flowType", flowType);
+    parameters.put("productErpId", key == null ? null : key.productErpId());
+    parameters.put("storeErpId", key == null ? null : key.storeErpId());
 
     String sql =
         FLOW_SELECT
             + " WHERE (CAST(:flowType AS text) IS NULL OR ft.code = CAST(:flowType AS flow_type))"
             + " AND (CAST(:productErpId AS text) IS NULL OR (p.erp_id = :productErpId AND s.erp_id"
             + " = :storeErpId))"
-            + StoreScope.SQL
+            + scope.sql()
             + " ORDER BY pa.created_at DESC, pa.id DESC";
     if (status != null) {
       sql =
           sql.replace(
               " ORDER BY",
               " AND COALESCE(pa.context ->> 'analysis_status', 'ANALYZED') = :analysisStatus ORDER BY");
-      parameters.addValue("analysisStatus", status);
+      parameters.put("analysisStatus", status);
     }
-    return jdbc.query(sql, parameters, (resultSet, rowNumber) -> toFlow(resultSet));
+    return JpaNativeQuery.rows(entityManager, sql, parameters).stream().map(this::toFlow).toList();
   }
 
   public Optional<FlowDTO> findById(String id, StoreScope scope) {
@@ -161,37 +154,42 @@ public class FlowRepository {
     if (analysisId == null) {
       return Optional.empty();
     }
+    Map<String, Object> parameters = new HashMap<>(scope.parameters());
+    parameters.put("id", analysisId);
     List<FlowDTO> flows =
-        jdbc.query(
-            FLOW_SELECT + " WHERE pa.id = :id" + StoreScope.SQL,
-            scope.parameters().addValue("id", analysisId),
-            (resultSet, rowNumber) -> toFlow(resultSet));
+        JpaNativeQuery.rows(
+                entityManager, FLOW_SELECT + " WHERE pa.id = :id" + scope.sql(), parameters)
+            .stream()
+            .map(this::toFlow)
+            .toList();
     return flows.stream().findFirst();
   }
 
-  private FlowDTO toFlow(java.sql.ResultSet resultSet) throws java.sql.SQLException {
-    OffsetDateTime analysisDate = resultSet.getObject("analysis_date", OffsetDateTime.class);
+  private FlowDTO toFlow(Map<String, Object> row) {
     return new FlowDTO(
-        resultSet.getString("id"),
-        resultSet.getString("public_product_id"),
-        resultSet.getString("product_name"),
-        resultSet.getString("flow_type"),
-        resultSet.getString("analysis_status"),
-        resultSet.getString("reason"),
-        resultSet.getBigDecimal("daily_sales_average"),
-        resultSet.getBigDecimal("stock_coverage_days"),
-        resultSet.getObject("expiration_days", Integer.class),
-        resultSet.getObject("supplier_lead_time", Integer.class),
-        analysisDate == null ? null : analysisDate.toInstant(),
-        readRisks(resultSet.getString("risks")),
-        resultSet.getString("classifier"),
-        resultSet.getBoolean("is_current"),
-        resultSet.getLong("store_id"));
+        Objects.toString(row.get("id")),
+        JpaNativeQuery.string(row, "public_product_id"),
+        JpaNativeQuery.string(row, "product_name"),
+        JpaNativeQuery.string(row, "flow_type"),
+        JpaNativeQuery.string(row, "analysis_status"),
+        JpaNativeQuery.string(row, "reason"),
+        JpaNativeQuery.decimal(row, "daily_sales_average"),
+        JpaNativeQuery.decimal(row, "stock_coverage_days"),
+        JpaNativeQuery.intValue(row, "expiration_days"),
+        JpaNativeQuery.intValue(row, "supplier_lead_time"),
+        JpaNativeQuery.instant(row, "analysis_date"),
+        readRisks(JpaNativeQuery.string(row, "risks")),
+        JpaNativeQuery.string(row, "classifier"),
+        Boolean.TRUE.equals(row.get("is_current")),
+        JpaNativeQuery.longValue(row, "store_id"));
   }
 
   public List<BigDecimal> comparableSales(String publicId, StoreScope scope) {
-    return jdbc.query(
-        """
+    Map<String, Object> parameters = new HashMap<>(scope.parameters());
+    parameters.put("publicId", publicId);
+    return JpaNativeQuery.rows(
+            entityManager,
+            """
         SELECT peer.sales_7d FROM product_store target
         JOIN product p ON p.id = target.product_id
         JOIN store s ON s.id = target.store_id
@@ -202,9 +200,11 @@ public class FlowRepository {
           AND p.active = TRUE AND target.active = TRUE AND peer.active = TRUE
           AND peer.sales_7d IS NOT NULL
         """
-            + StoreScope.SQL,
-        scope.parameters().addValue("publicId", publicId),
-        (row, index) -> row.getBigDecimal("sales_7d"));
+                + scope.sql(),
+            parameters)
+        .stream()
+        .map(row -> JpaNativeQuery.decimal(row, "sales_7d"))
+        .toList();
   }
 
   private List<String> readRisks(String json) {
