@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import tools.jackson.databind.JsonNode;
 
 public record ChatRequest(
     @Schema(
@@ -20,10 +21,17 @@ public record ChatRequest(
             description = "true somente ao retomar conversa encerrada; exige conversation_id.",
             defaultValue = "false")
         @JsonProperty("is_resuming_conversation")
-        Boolean resumingConversation) {
+        Boolean resumingConversation,
+    @Schema(description = "Card opcional do produto associado à conversa.")
+        @JsonProperty("product_card")
+        JsonNode productCard) {
   public ChatRequest {
     if (resumingConversation == null) {
       resumingConversation = false;
     }
+  }
+
+  public ChatRequest(String message, String conversationId, Boolean resumingConversation) {
+    this(message, conversationId, resumingConversation, null);
   }
 }

@@ -16,10 +16,13 @@ import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.databind.JsonNode;
 
 @Tag(name = "Chat")
 @SecurityRequirement(name = "bearerAuth")
@@ -109,6 +112,33 @@ public class ChatController {
   public ResponseEntity<ChatResponse> answer(
       @Valid @RequestBody ChatRequest request, @AuthenticationPrincipal Jwt jwt) {
     ResponseEntity<ChatResponse> result = chatService.answer(request, jwt.getTokenValue());
+    return ResponseEntity.status(result.getStatusCode())
+        .cacheControl(CacheControl.noStore())
+        .body(result.getBody());
+  }
+
+  @GetMapping("/conversations")
+  @Operation(summary = "Listar conversas encerradas")
+  public ResponseEntity<JsonNode> endedConversations(@AuthenticationPrincipal Jwt jwt) {
+    return ResponseEntity.ok()
+        .cacheControl(CacheControl.noStore())
+        .body(chatService.endedConversations(jwt.getTokenValue()));
+  }
+
+  @GetMapping("/conversations/{conversationId}/messages")
+  @Operation(summary = "Consultar mensagens de uma conversa")
+  public ResponseEntity<JsonNode> history(
+      @PathVariable String conversationId, @AuthenticationPrincipal Jwt jwt) {
+    return ResponseEntity.ok()
+        .cacheControl(CacheControl.noStore())
+        .body(chatService.history(conversationId, jwt.getTokenValue()));
+  }
+
+  @PostMapping("/conversations/{conversationId}/end")
+  @Operation(summary = "Encerrar conversa")
+  public ResponseEntity<JsonNode> end(
+      @PathVariable String conversationId, @AuthenticationPrincipal Jwt jwt) {
+    ResponseEntity<JsonNode> result = chatService.end(conversationId, jwt.getTokenValue());
     return ResponseEntity.status(result.getStatusCode())
         .cacheControl(CacheControl.noStore())
         .body(result.getBody());

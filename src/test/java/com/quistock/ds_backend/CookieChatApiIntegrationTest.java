@@ -132,6 +132,45 @@ class CookieChatApiIntegrationTest {
   }
 
   @Test
+  void proxiesConversationListHistoryAndEndOnlyWithTheAuthenticatedBearer() throws Exception {
+    HttpResponse<String> list =
+        send("GET", "/chat/conversations", null, Map.of("Authorization", "Bearer " + jwt));
+    HttpResponse<String> history =
+        send(
+            "GET",
+            "/chat/conversations/abc/messages",
+            null,
+            Map.of("Authorization", "Bearer " + jwt));
+    HttpResponse<String> end =
+        send("POST", "/chat/conversations/abc/end", null, Map.of("Authorization", "Bearer " + jwt));
+
+    assertThat(list.statusCode()).isEqualTo(200);
+    assertThat(JSON.readTree(list.body()).path("conversations").size()).isEqualTo(1);
+    assertThat(history.statusCode()).isEqualTo(200);
+    assertThat(JSON.readTree(history.body()).path("messages").size()).isEqualTo(1);
+    assertThat(end.statusCode()).isEqualTo(202);
+    assertThat(JSON.readTree(end.body()).path("summary_status").asString()).isEqualTo("queued");
+    assertThat(list.headers().firstValue("cache-control")).hasValue("no-store");
+    assertThat(history.headers().firstValue("cache-control")).hasValue("no-store");
+    assertThat(end.headers().firstValue("cache-control")).hasValue("no-store");
+    assertThat(SENT_AUTHORIZATION.get()).isEqualTo("Bearer " + jwt);
+    assertThat(SENT_COOKIE.get()).isNull();
+    assertThat(AI_CALLS.get()).isEqualTo(3);
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "GET,/chat/conversations",
+    "GET,/chat/conversations/abc/messages",
+    "POST,/chat/conversations/abc/end"
+  })
+  void requiresAuthenticationForEveryConversationOperation(String method, String path)
+      throws Exception {
+    assertThat(send(method, path, null, Map.of()).statusCode()).isEqualTo(401);
+    assertThat(AI_CALLS.get()).isZero();
+  }
+
+  @Test
   void rejectsCookieWritesWithoutAValidCsrfPairAndBearerCannotBypassConflict() throws Exception {
     for (String method : new String[] {"POST", "PATCH", "PUT", "DELETE"}) {
       assertThat(
@@ -416,12 +455,20 @@ class CookieChatApiIntegrationTest {
             AI_CALLS.incrementAndGet();
             SENT_AUTHORIZATION.set(exchange.getRequestHeaders().getFirst("Authorization"));
             SENT_COOKIE.set(exchange.getRequestHeaders().getFirst("Cookie"));
+            String path = exchange.getRequestURI().getPath();
+            String method = exchange.getRequestMethod();
             SENT_BODY.set(JSON.readTree(exchange.getRequestBody()));
-            String id = exchange.getRequestURI().getPath().split("/")[4];
-            String body = AI_BODY.get() == null ? responseBody(id, "success") : AI_BODY.get();
+            String id = path.split("/")[4];
+            String body = AI_BODY.get();
+            int status = AI_STATUS.get();
+            if (body == null) {
+              StubResponse stub = stubResponse(method, path, id);
+              body = stub.body();
+              status = stub.status();
+            }
             byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(AI_STATUS.get(), bytes.length == 0 ? -1 : bytes.length);
+            exchange.sendResponseHeaders(status, bytes.length == 0 ? -1 : bytes.length);
             try (var output = exchange.getResponseBody()) {
               output.write(bytes);
             }
@@ -432,6 +479,31 @@ class CookieChatApiIntegrationTest {
       throw new IllegalStateException(exception);
     }
   }
+
+  private static StubResponse stubResponse(String method, String path, String id) {
+    if ("GET".equals(method) && path.endsWith("/ended")) {
+      return new StubResponse(
+          "{\"conversations\":[{\"conversation_id\":\"abc\",\"title\":null,"
+              + "\"updated_at\":\"2026-10-12T12:00:00Z\"}]}",
+          200);
+    }
+    if ("GET".equals(method) && path.endsWith("/messages")) {
+      return new StubResponse(
+          "{\"conversation_id\":\"abc\",\"title\":null,\"status\":\"active\","
+              + "\"messages\":[{\"message_id\":\"m1\",\"role\":\"user\","
+              + "\"content\":\"hi\",\"created_at\":\"2026-10-12T12:00:00Z\"}]}",
+          200);
+    }
+    if (path.endsWith("/end")) {
+      return new StubResponse(
+          "{\"conversation_id\":\"abc\",\"request_id\":\"r\",\"job_id\":\"j\","
+              + "\"status\":\"ended\",\"summary_status\":\"queued\"}",
+          202);
+    }
+    return new StubResponse(responseBody(id, "success"), AI_STATUS.get());
+  }
+
+  private record StubResponse(String body, int status) {}
 
   private static RSAKey key() {
     try {
