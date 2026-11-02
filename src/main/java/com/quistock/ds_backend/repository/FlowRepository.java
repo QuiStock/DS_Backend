@@ -82,8 +82,7 @@ public class FlowRepository {
     parameters.put("flowType", analysis.flowType());
     parameters.put("classifier", "SALES_PERCENTILES_V1");
     parameters.put(
-        "analysisStatus",
-        analysis.flowType() == null ? "INSUFFICIENT_DATA" : "ANALYZED");
+        "analysisStatus", analysis.flowType() == null ? "INSUFFICIENT_DATA" : "ANALYZED");
     parameters.put("reason", analysis.reason());
     parameters.put("dailySalesAverage", analysis.dailySalesAverage());
     parameters.put("stockCoverageDays", analysis.stockCoverageDays());
