@@ -5,8 +5,6 @@ import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.Map;
 import org.springframework.stereotype.Repository;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.ObjectMapper;
 
 @Repository
 class ActionAuditRepository {
@@ -20,11 +18,9 @@ class ActionAuditRepository {
   private static final String PROMOTION_UNTIL_KEY = "promotion_valid_until";
 
   private final EntityManager entityManager;
-  private final ObjectMapper objectMapper;
 
-  ActionAuditRepository(EntityManager entityManager, ObjectMapper objectMapper) {
+  ActionAuditRepository(EntityManager entityManager) {
     this.entityManager = entityManager;
-    this.objectMapper = objectMapper;
   }
 
   void logGenerated(GeneratedLog log) {
@@ -69,44 +65,91 @@ class ActionAuditRepository {
   }
 
   private void writeLog(long suggestionId, LogData log) {
+    Map<String, Object> parameters =
+        JpaNativeQuery.parameters(
+            "suggestionId", suggestionId,
+            "userId", log.userId(),
+            "event", log.event(),
+            "reason", log.reason());
+
+    long logId =
+        JpaNativeQuery.longValue(
+            JpaNativeQuery.rows(
+                    entityManager,
+                    """
+                    INSERT INTO suggestion_log (suggestion_id, user_id, event, reason, occurred_at)
+                    VALUES (:suggestionId, :userId, CAST(:event AS suggestion_log_event),
+                            :reason, CURRENT_TIMESTAMP)
+                    RETURNING id
+                    """,
+                    parameters)
+                .getFirst(),
+            "id");
+
+    if (!log.previousData().isEmpty()) {
+      insertPreviousSnapshot(logId, log.previousData());
+    }
+    insertAfterSnapshot(suggestionId, logId, log);
+  }
+
+  private void insertPreviousSnapshot(long logId, Map<String, Object> snapshot) {
     JpaNativeQuery.update(
         entityManager,
         """
-        INSERT INTO suggestion_log (
-          suggestion_id, user_id, event, recorded_status, batch_quantity,
-          discount_percentage, promotional_price, valid_from, valid_until,
-          previous_data, new_data, reason, occurred_at
+        INSERT INTO suggestion_log_snapshot (
+          suggestion_log_id, snapshot_side, status, type, flow_id, quantity,
+          desired_order_date, discount_percentage, reference_sale_price,
+          promotional_price, promotion_valid_from, promotion_valid_until
         ) VALUES (
-          :suggestionId, :userId, CAST(:event AS suggestion_log_event), :status,
-          (SELECT current_batch_count FROM suggestion WHERE id = :suggestionId),
-          (SELECT current_discount_percentage FROM suggestion WHERE id = :suggestionId),
-          (SELECT promotional_price FROM suggestion WHERE id = :suggestionId), :validFrom, :validUntil,
-          CAST(:previousData AS jsonb), CAST(:newData AS jsonb) ||
-            (SELECT jsonb_build_object('quantity', current_batch_count,
-               'desired_order_date', desired_order_date, 'discount_percentage', current_discount_percentage,
-               'reference_sale_price', reference_sale_price, 'promotional_price', promotional_price)
-             FROM suggestion WHERE id = :suggestionId), :reason, CURRENT_TIMESTAMP
+          :logId, 'BEFORE', CAST(:status AS text),
+          CAST(:type AS suggestion_type), CAST(:flowId AS bigint),
+          CAST(:quantity AS integer), CAST(:desiredOrderDate AS date),
+          CAST(:discount AS numeric(5,2)), CAST(:referencePrice AS numeric(12,2)),
+          CAST(:promotionalPrice AS numeric(12,2)),
+          CAST(:validFrom AS date), CAST(:validUntil AS date)
         )
         """,
         JpaNativeQuery.parameters(
-            "suggestionId",
-            suggestionId,
-            "userId",
-            log.userId(),
-            "event",
-            log.event(),
-            "status",
-            log.status(),
-            "validFrom",
-            log.validFrom(),
-            "validUntil",
-            log.validUntil(),
-            "previousData",
-            toJson(log.previousData()),
-            "newData",
-            toJson(log.newData()),
-            "reason",
-            log.reason()));
+            "logId", logId,
+            "status", snapshot.get(STATUS_KEY),
+            "type", snapshot.get("type"),
+            "flowId", snapshot.get("flow_id"),
+            "quantity", snapshot.get("quantity"),
+            "desiredOrderDate", snapshot.get("desired_order_date"),
+            "discount", snapshot.get("discount_percentage"),
+            "referencePrice", snapshot.get("reference_sale_price"),
+            "promotionalPrice", snapshot.get("promotional_price"),
+            "validFrom", snapshot.get(PROMOTION_FROM_KEY),
+            "validUntil", snapshot.get(PROMOTION_UNTIL_KEY)));
+  }
+
+  private void insertAfterSnapshot(long suggestionId, long logId, LogData log) {
+    JpaNativeQuery.update(
+        entityManager,
+        """
+        INSERT INTO suggestion_log_snapshot (
+          suggestion_log_id, snapshot_side, status, type, flow_id, quantity,
+          desired_order_date, discount_percentage, reference_sale_price,
+          promotional_price, promotion_valid_from, promotion_valid_until
+        )
+        SELECT :logId, 'AFTER',
+               COALESCE(CAST(:status AS text), sg.status::text),
+               COALESCE(CAST(:type AS suggestion_type), sg.type),
+               COALESCE(CAST(:flowId AS bigint), sg.product_analysis_id),
+               sg.current_batch_count, sg.desired_order_date,
+               sg.current_discount_percentage, sg.reference_sale_price,
+               sg.promotional_price, CAST(:validFrom AS date), CAST(:validUntil AS date)
+        FROM suggestion sg
+        WHERE sg.id = :suggestionId
+        """,
+        JpaNativeQuery.parameters(
+            "suggestionId", suggestionId,
+            "logId", logId,
+            "status", log.newData().get(STATUS_KEY),
+            "type", log.newData().get("type"),
+            "flowId", log.newData().get("flow_id"),
+            "validFrom", log.validFrom(),
+            "validUntil", log.validUntil()));
   }
 
   private String eventFor(String status) {
@@ -117,14 +160,6 @@ class ActionAuditRepository {
       case REJECTED -> REJECTED;
       default -> GENERATED;
     };
-  }
-
-  private String toJson(Object value) {
-    try {
-      return objectMapper.writeValueAsString(value);
-    } catch (JacksonException exception) {
-      throw new IllegalStateException("Could not serialize suggestion history JSON.", exception);
-    }
   }
 
   private Map<String, Object> data(Object... keyValues) {

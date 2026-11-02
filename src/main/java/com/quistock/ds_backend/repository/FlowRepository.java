@@ -22,7 +22,14 @@ public class FlowRepository {
       SELECT pa.id, pa.store_id,
              COALESCE(pa.classifier, 'RULE_ENGINE') AS classifier,
              COALESCE(pa.analysis_status, 'ANALYZED') AS analysis_status,
-             COALESCE(pa.context -> 'risks', '[]'::jsonb)::text AS risks,
+             CASE WHEN pa.risks_is_null THEN 'null'::jsonb
+                  ELSE COALESCE(
+                    (SELECT jsonb_agg(par.risk_code ORDER BY par.risk_position)
+                     FROM product_analysis_risk par
+                     WHERE par.product_analysis_id = pa.id),
+                    '[]'::jsonb
+                  )
+             END::text AS risks,
              (pa.classifier = 'SALES_PERCENTILES_V1' AND p.active = TRUE
                AND EXISTS (SELECT 1 FROM product_store current_ps
                  WHERE current_ps.product_id = pa.product_id AND current_ps.store_id = pa.store_id
@@ -37,10 +44,7 @@ public class FlowRepository {
              pa.daily_sales_average,
              pa.stock_coverage_days,
              pa.expiration_days,
-             COALESCE(
-               pa.supplier_lead_time_days,
-               NULLIF(pa.context #>> '{legacy_metrics,supplier_lead_time}', 'null')::integer
-             ) AS supplier_lead_time,
+             pa.supplier_lead_time_days AS supplier_lead_time,
              pa.created_at AS analysis_date
       FROM product_analysis pa
       JOIN product p ON p.id = pa.product_id
@@ -75,9 +79,6 @@ public class FlowRepository {
             + scope.sql()
             + " FOR UPDATE OF ps",
         parameters);
-    Map<String, Object> context = new HashMap<>();
-    context.put("risks", analysis.risks());
-
     parameters.put("executionId", executionId);
     parameters.put("flowType", analysis.flowType());
     parameters.put("classifier", "SALES_PERCENTILES_V1");
@@ -92,7 +93,8 @@ public class FlowRepository {
     parameters.put("sales30d", analysis.sales30d());
     parameters.put("expirationDays", analysis.expirationDays());
     parameters.put("supplierLeadTimeDays", analysis.supplierLeadTime());
-    parameters.put("context", toJson(context));
+    parameters.put("risksPresent", true);
+    parameters.put("risksIsNull", analysis.risks() == null);
     parameters.put("createdAt", OffsetDateTime.ofInstant(analysis.createdAt(), ZoneOffset.UTC));
 
     List<Map<String, Object>> ids =
@@ -102,7 +104,8 @@ public class FlowRepository {
             INSERT INTO product_analysis (
               ml_execution_id, store_id, product_id, flow_type_id, classifier, analysis_status,
               reason, daily_sales_average, stock_coverage_days, current_stock, minimum_stock,
-              sales_7d, sales_30d, expiration_days, supplier_lead_time_days, context, created_at
+              sales_7d, sales_30d, expiration_days, supplier_lead_time_days,
+              risks_present, risks_is_null, created_at
             )
             SELECT :executionId, ps.store_id, ps.product_id, ft.id,
                    CAST(:classifier AS varchar(100)),
@@ -116,7 +119,7 @@ public class FlowRepository {
                    CAST(:sales30d AS numeric(14,3)),
                    CAST(:expirationDays AS integer),
                    CAST(:supplierLeadTimeDays AS integer),
-                   CAST(:context AS jsonb), :createdAt
+                   :risksPresent, :risksIsNull, :createdAt
             FROM product_store ps
             JOIN product p ON p.id = ps.product_id
             JOIN store s ON s.id = ps.store_id
@@ -129,7 +132,30 @@ public class FlowRepository {
                 + scope.sql()
                 + " RETURNING id",
             parameters);
-    return ids.isEmpty() ? -1 : JpaNativeQuery.longValue(ids.get(0), "id");
+    if (ids.isEmpty()) {
+      return -1;
+    }
+    long analysisId = JpaNativeQuery.longValue(ids.get(0), "id");
+    insertRisks(analysisId, analysis.risks() == null ? List.of() : analysis.risks());
+    return analysisId;
+  }
+
+  private void insertRisks(long analysisId, List<String> risks) {
+    for (int index = 0; index < risks.size(); index++) {
+      JpaNativeQuery.update(
+          entityManager,
+          """
+          INSERT INTO product_analysis_risk (product_analysis_id, risk_position, risk_code)
+          VALUES (:analysisId, :riskPosition, :riskCode)
+          """,
+          JpaNativeQuery.parameters(
+              "analysisId",
+              analysisId,
+              "riskPosition",
+              index + 1,
+              "riskCode",
+              risks.get(index)));
+    }
   }
 
   public List<FlowDTO> findAll(String flowType, String productId, String status, StoreScope scope) {
@@ -223,14 +249,6 @@ public class FlowRepository {
           json, objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
     } catch (JacksonException exception) {
       throw new IllegalStateException("Could not read analysis risks.", exception);
-    }
-  }
-
-  private String toJson(Object value) {
-    try {
-      return objectMapper.writeValueAsString(value);
-    } catch (JacksonException exception) {
-      throw new IllegalStateException("Could not serialize analysis JSON.", exception);
     }
   }
 

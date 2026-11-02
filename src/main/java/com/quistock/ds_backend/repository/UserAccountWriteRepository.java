@@ -67,23 +67,30 @@ public class UserAccountWriteRepository {
 
   public void insertAuditEvent(
       long actorId, long targetId, String action, String role, String email) {
+    long auditEventId =
+        JpaNativeQuery.longValue(
+            JpaNativeQuery.rows(
+                    entityManager,
+                    """
+                    INSERT INTO audit_event (user_id, entity, entity_id, action, database_user)
+                    VALUES (:actorId, 'user_account', :targetId, :action, CURRENT_USER)
+                    RETURNING id
+                    """,
+                    Map.of(
+                        "actorId", actorId,
+                        "targetId", targetId,
+                        "action", action))
+                .getFirst(),
+            "id");
     JpaNativeQuery.update(
         entityManager,
         """
-        INSERT INTO audit_event (user_id, entity, entity_id, action, data)
-        VALUES (:actorId, 'user_account', :targetId, :action,
-                jsonb_build_object('role', :role, 'email', :email))
+        INSERT INTO audit_event_user_account_detail (audit_event_id, role_code, email)
+        VALUES (:auditEventId, :role, :email)
         """,
         Map.of(
-            "actorId",
-            actorId,
-            "targetId",
-            targetId,
-            "action",
-            action,
-            "role",
-            role,
-            EMAIL_PARAMETER,
-            email));
+            "auditEventId", auditEventId,
+            "role", role,
+            EMAIL_PARAMETER, email));
   }
 }
