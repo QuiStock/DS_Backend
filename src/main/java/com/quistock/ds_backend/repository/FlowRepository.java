@@ -148,7 +148,8 @@ public class FlowRepository {
           INSERT INTO product_analysis_risk (product_analysis_id, risk_position, risk_code)
           VALUES (:analysisId, :riskPosition, :riskCode)
           """,
-          JpaNativeQuery.parameters("analysisId", analysisId, "riskPosition", index + 1, "riskCode", risks.get(index)));
+          JpaNativeQuery.parameters(
+              "analysisId", analysisId, "riskPosition", index + 1, "riskCode", risks.get(index)));
     }
   }
 
