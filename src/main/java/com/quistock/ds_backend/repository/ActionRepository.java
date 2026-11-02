@@ -72,12 +72,12 @@ public class ActionRepository {
             entityManager,
             """
             INSERT INTO suggestion (
-              product_analysis_id, store_id, product_id, "type", origin, status,
+              product_analysis_id, product_store_id, "type", origin, status,
               promotion_valid_from, promotion_valid_until, reference_sale_price,
               created_by_id, available_for_triage, current_batch_count, desired_order_date,
               current_discount_percentage, promotional_price
             )
-            SELECT pa.id, pa.store_id, pa.product_id,
+            SELECT pa.id, NULL,
                    CAST(:actionType AS suggestion_type),
                    CAST(:origin AS suggestion_origin),
                    CAST(:status AS suggestion_status),
@@ -147,7 +147,11 @@ public class ActionRepository {
                 """
             SELECT sg.id, sg.status::text AS status, sg."type"::text AS type,
                    sg.promotion_valid_from, sg.promotion_valid_until
-            FROM suggestion sg JOIN store s ON s.id = sg.store_id WHERE sg.id = :id
+            FROM suggestion sg
+            LEFT JOIN product_analysis pa ON pa.id = sg.product_analysis_id
+            LEFT JOIN product_store ps ON ps.id = sg.product_store_id
+            JOIN store s ON s.id = COALESCE(pa.store_id, ps.store_id)
+            WHERE sg.id = :id
             """
                     + scope.sql()
                     + " FOR UPDATE OF sg",

@@ -29,7 +29,8 @@ class ActionReadRepository {
         """
         SELECT sg.id, sg.current_batch_count, sg.desired_order_date,
                sg.current_discount_percentage, sg.reference_sale_price, sg.promotional_price,
-               sg.store_id, p.erp_id || ':' || s.erp_id AS public_product_id,
+               COALESCE(pa.store_id, ps.store_id) AS store_id,
+               p.erp_id || ':' || s.erp_id AS public_product_id,
                pa.id AS flow_id, p.name AS product_name,
                sg."type"::text AS action_type, sg.status::text AS status,
                COALESCE((SELECT sl.reason FROM suggestion_log sl
@@ -38,9 +39,10 @@ class ActionReadRepository {
                sg.promotion_valid_from, sg.promotion_valid_until,
                sd.justification AS decision_justification
         FROM suggestion sg
-        JOIN store s ON s.id = sg.store_id
-        JOIN product p ON p.id = sg.product_id
         LEFT JOIN product_analysis pa ON pa.id = sg.product_analysis_id
+        LEFT JOIN product_store ps ON ps.id = sg.product_store_id
+        JOIN store s ON s.id = COALESCE(pa.store_id, ps.store_id)
+        JOIN product p ON p.id = COALESCE(pa.product_id, ps.product_id)
         LEFT JOIN suggestion_decision sd ON sd.suggestion_id = sg.id
         WHERE (CAST(:status AS text) IS NULL OR sg.status = CAST(:status AS suggestion_status))
           AND (CAST(:actionType AS text) IS NULL OR sg."type" = CAST(:actionType AS suggestion_type))
@@ -57,7 +59,10 @@ class ActionReadRepository {
     List<Map<String, Object>> types =
         JpaNativeQuery.rows(
             entityManager,
-            "SELECT sg.\"type\"::text AS action_type FROM suggestion sg JOIN store s ON s.id = sg.store_id"
+            "SELECT sg.\"type\"::text AS action_type FROM suggestion sg"
+                + " LEFT JOIN product_analysis pa ON pa.id = sg.product_analysis_id"
+                + " LEFT JOIN product_store ps ON ps.id = sg.product_store_id"
+                + " JOIN store s ON s.id = COALESCE(pa.store_id, ps.store_id)"
                 + " WHERE sg.id = :id"
                 + scope.sql(),
             parameters(scope, "id", id));
@@ -71,14 +76,19 @@ class ActionReadRepository {
                 """
                 SELECT sg.id, sg.current_batch_count, sg.desired_order_date,
                        sg.current_discount_percentage, sg.reference_sale_price, sg.promotional_price,
-                       sg.store_id, p.erp_id || ':' || s.erp_id AS public_product_id,
+                       COALESCE(pa.store_id, ps.store_id) AS store_id,
+                       p.erp_id || ':' || s.erp_id AS public_product_id,
                        sg."type"::text AS action_type, sg.status::text AS status,
                        COALESCE((SELECT sl.reason FROM suggestion_log sl
                          WHERE sl.suggestion_id = sg.id AND sl.event = 'GENERATED'
                          ORDER BY sl.occurred_at, sl.id LIMIT 1), '') AS justification,
                        sg.promotion_valid_from, sg.promotion_valid_until
-                FROM suggestion sg JOIN store s ON s.id = sg.store_id
-                JOIN product p ON p.id = sg.product_id WHERE sg.id = :id
+                FROM suggestion sg
+                LEFT JOIN product_analysis pa ON pa.id = sg.product_analysis_id
+                LEFT JOIN product_store ps ON ps.id = sg.product_store_id
+                JOIN store s ON s.id = COALESCE(pa.store_id, ps.store_id)
+                JOIN product p ON p.id = COALESCE(pa.product_id, ps.product_id)
+                WHERE sg.id = :id
                 """
                     + scope.sql(),
                 parameters(scope, "id", suggestionId))
@@ -94,8 +104,11 @@ class ActionReadRepository {
   Long findSuggestionIdByFlow(long flowId, String type, StoreScope scope) {
     return JpaNativeQuery.rows(
             entityManager,
-            "SELECT sg.id FROM suggestion sg JOIN store s ON s.id = sg.store_id"
-                + " WHERE sg.product_analysis_id = :flowId AND sg.type = CAST(:type AS suggestion_type)"
+            "SELECT sg.id FROM suggestion sg"
+                + " JOIN product_analysis pa ON pa.id = sg.product_analysis_id"
+                + " JOIN store s ON s.id = pa.store_id"
+                + " WHERE sg.product_analysis_id = :flowId"
+                + " AND sg.type = CAST(:type AS suggestion_type)"
                 + scope.sql(),
             parameters(scope, FLOW_ID, flowId, "type", type))
         .stream()
@@ -125,8 +138,8 @@ class ActionReadRepository {
                     entityManager,
                     """
                     SELECT EXISTS (SELECT 1 FROM product_analysis pa JOIN store s ON s.id = pa.store_id
-                    WHERE pa.id = :flowId AND pa.context ->> 'classifier' = 'SALES_PERCENTILES_V1'
-                      AND pa.context ->> 'analysis_status' = 'ANALYZED'
+                    WHERE pa.id = :flowId AND pa.classifier = 'SALES_PERCENTILES_V1'
+                      AND pa.analysis_status = 'ANALYZED'
                       AND NOT EXISTS (SELECT 1 FROM product_analysis newer
                         WHERE newer.store_id = pa.store_id AND newer.product_id = pa.product_id
                           AND (newer.created_at, newer.id) > (pa.created_at, pa.id))
@@ -148,9 +161,13 @@ class ActionReadRepository {
                     entityManager,
                     """
                     SELECT EXISTS (SELECT 1 FROM suggestion sg
-                    JOIN product_analysis pa ON pa.store_id = sg.store_id AND pa.product_id = sg.product_id
-                    JOIN store s ON s.id = sg.store_id
-                    WHERE pa.id = :flowId AND sg.type = CAST(:type AS suggestion_type)
+                    LEFT JOIN product_analysis source_pa ON source_pa.id = sg.product_analysis_id
+                    LEFT JOIN product_store source_ps ON source_ps.id = sg.product_store_id
+                    JOIN product_analysis target_pa ON target_pa.id = :flowId
+                    JOIN store s ON s.id = COALESCE(source_pa.store_id, source_ps.store_id)
+                    WHERE COALESCE(source_pa.store_id, source_ps.store_id) = target_pa.store_id
+                      AND COALESCE(source_pa.product_id, source_ps.product_id) = target_pa.product_id
+                      AND sg.type = CAST(:type AS suggestion_type)
                       AND sg.product_analysis_id IS DISTINCT FROM :flowId
                       AND sg.status IN ('GENERATED', 'IN_EMPLOYEE_TRIAGE', 'SENT_TO_MANAGER')
                     """
