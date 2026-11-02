@@ -155,13 +155,20 @@ class ActionAuditRepository {
         WHERE sg.id = :suggestionId
         """,
         JpaNativeQuery.parameters(
-            "suggestionId", suggestionId,
-            "logId", logId,
-            "status", log.newData().get(STATUS_KEY),
-            TYPE_KEY, log.newData().get(TYPE_KEY),
-            "flowId", log.newData().get("flow_id"),
-            "validFrom", log.validFrom(),
-            "validUntil", log.validUntil()));
+            "suggestionId",
+            suggestionId,
+            "logId",
+            logId,
+            "status",
+            log.newData().get(STATUS_KEY),
+            TYPE_KEY,
+            log.newData().get(TYPE_KEY),
+            "flowId",
+            log.newData().get("flow_id"),
+            "validFrom",
+            log.validFrom(),
+            "validUntil",
+            log.validUntil()));
   }
 
   private String eventFor(String status) {
