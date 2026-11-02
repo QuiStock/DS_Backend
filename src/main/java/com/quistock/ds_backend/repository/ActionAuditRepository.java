@@ -111,17 +111,28 @@ class ActionAuditRepository {
         )
         """,
         JpaNativeQuery.parameters(
-            "logId", logId,
-            "status", snapshot.get(STATUS_KEY),
-            TYPE_KEY, snapshot.get(TYPE_KEY),
-            "flowId", snapshot.get("flow_id"),
-            "quantity", snapshot.get("quantity"),
-            "desiredOrderDate", snapshot.get("desired_order_date"),
-            "discount", snapshot.get("discount_percentage"),
-            "referencePrice", snapshot.get("reference_sale_price"),
-            "promotionalPrice", snapshot.get("promotional_price"),
-            "validFrom", snapshot.get(PROMOTION_FROM_KEY),
-            "validUntil", snapshot.get(PROMOTION_UNTIL_KEY)));
+            "logId",
+            logId,
+            "status",
+            snapshot.get(STATUS_KEY),
+            TYPE_KEY,
+            snapshot.get(TYPE_KEY),
+            "flowId",
+            snapshot.get("flow_id"),
+            "quantity",
+            snapshot.get("quantity"),
+            "desiredOrderDate",
+            snapshot.get("desired_order_date"),
+            "discount",
+            snapshot.get("discount_percentage"),
+            "referencePrice",
+            snapshot.get("reference_sale_price"),
+            "promotionalPrice",
+            snapshot.get("promotional_price"),
+            "validFrom",
+            snapshot.get(PROMOTION_FROM_KEY),
+            "validUntil",
+            snapshot.get(PROMOTION_UNTIL_KEY)));
   }
 
   private void insertAfterSnapshot(long suggestionId, long logId, LogData log) {
