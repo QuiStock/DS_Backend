@@ -20,10 +20,10 @@ public class FlowRepository {
   private static final String FLOW_SELECT =
       """
       SELECT pa.id, pa.store_id,
-             COALESCE(pa.context ->> 'classifier', 'RULE_ENGINE') AS classifier,
-             COALESCE(pa.context ->> 'analysis_status', 'ANALYZED') AS analysis_status,
+             COALESCE(pa.classifier, 'RULE_ENGINE') AS classifier,
+             COALESCE(pa.analysis_status, 'ANALYZED') AS analysis_status,
              COALESCE(pa.context -> 'risks', '[]'::jsonb)::text AS risks,
-             (pa.context ->> 'classifier' = 'SALES_PERCENTILES_V1' AND p.active = TRUE
+             (pa.classifier = 'SALES_PERCENTILES_V1' AND p.active = TRUE
                AND EXISTS (SELECT 1 FROM product_store current_ps
                  WHERE current_ps.product_id = pa.product_id AND current_ps.store_id = pa.store_id
                    AND current_ps.active = TRUE)
@@ -33,11 +33,14 @@ public class FlowRepository {
              p.erp_id || ':' || s.erp_id AS public_product_id,
              p.name AS product_name,
              ft.code::text AS flow_type,
-             COALESCE(pa.context ->> 'reason', '') AS reason,
-             (pa.metrics ->> 'daily_sales_average')::numeric AS daily_sales_average,
-             (pa.metrics ->> 'stock_coverage_days')::numeric AS stock_coverage_days,
-             NULLIF(pa.metrics ->> 'expiration_days', 'null')::integer AS expiration_days,
-             NULLIF(pa.metrics ->> 'supplier_lead_time', 'null')::integer AS supplier_lead_time,
+             COALESCE(pa.reason, '') AS reason,
+             pa.daily_sales_average,
+             pa.stock_coverage_days,
+             pa.expiration_days,
+             COALESCE(
+               pa.supplier_lead_time_days,
+               NULLIF(pa.context #>> '{legacy_metrics,supplier_lead_time}', 'null')::integer
+             ) AS supplier_lead_time,
              pa.created_at AS analysis_date
       FROM product_analysis pa
       JOIN product p ON p.id = pa.product_id
@@ -72,29 +75,24 @@ public class FlowRepository {
             + scope.sql()
             + " FOR UPDATE OF ps",
         parameters);
-    Map<String, Object> metrics = new HashMap<>();
-    metrics.put("daily_sales_average", analysis.dailySalesAverage());
-    metrics.put("stock_coverage_days", analysis.stockCoverageDays());
-    metrics.put("current_stock", analysis.currentStock());
-    metrics.put("minimum_stock", analysis.minimumStock());
-    metrics.put("sales_7d", analysis.sales7d());
-    metrics.put("sales_30d", analysis.sales30d());
-    metrics.put("expiration_days", analysis.expirationDays());
-    metrics.put("supplier_lead_time", analysis.supplierLeadTime());
-    Map<String, Object> context =
-        Map.of(
-            "reason",
-            analysis.reason(),
-            "classifier",
-            "SALES_PERCENTILES_V1",
-            "analysis_status",
-            analysis.flowType() == null ? "INSUFFICIENT_DATA" : "ANALYZED",
-            "risks",
-            analysis.risks());
+    Map<String, Object> context = new HashMap<>();
+    context.put("risks", analysis.risks());
 
     parameters.put("executionId", executionId);
     parameters.put("flowType", analysis.flowType());
-    parameters.put("metrics", toJson(metrics));
+    parameters.put("classifier", "SALES_PERCENTILES_V1");
+    parameters.put(
+        "analysisStatus",
+        analysis.flowType() == null ? "INSUFFICIENT_DATA" : "ANALYZED");
+    parameters.put("reason", analysis.reason());
+    parameters.put("dailySalesAverage", analysis.dailySalesAverage());
+    parameters.put("stockCoverageDays", analysis.stockCoverageDays());
+    parameters.put("currentStock", analysis.currentStock());
+    parameters.put("minimumStock", analysis.minimumStock());
+    parameters.put("sales7d", analysis.sales7d());
+    parameters.put("sales30d", analysis.sales30d());
+    parameters.put("expirationDays", analysis.expirationDays());
+    parameters.put("supplierLeadTimeDays", analysis.supplierLeadTime());
     parameters.put("context", toJson(context));
     parameters.put("createdAt", OffsetDateTime.ofInstant(analysis.createdAt(), ZoneOffset.UTC));
 
@@ -103,10 +101,23 @@ public class FlowRepository {
             entityManager,
             """
             INSERT INTO product_analysis (
-              ml_execution_id, store_id, product_id, flow_type_id, metrics, context, created_at
+              ml_execution_id, store_id, product_id, flow_type_id, classifier, analysis_status,
+              reason, daily_sales_average, stock_coverage_days, current_stock, minimum_stock,
+              sales_7d, sales_30d, expiration_days, supplier_lead_time_days, context, created_at
             )
             SELECT :executionId, ps.store_id, ps.product_id, ft.id,
-                   CAST(:metrics AS jsonb), CAST(:context AS jsonb), :createdAt
+                   CAST(:classifier AS varchar(100)),
+                   CAST(:analysisStatus AS varchar(40)),
+                   CAST(:reason AS text),
+                   CAST(:dailySalesAverage AS numeric(14,6)),
+                   CAST(:stockCoverageDays AS numeric(14,6)),
+                   CAST(:currentStock AS numeric(14,3)),
+                   CAST(:minimumStock AS numeric(14,3)),
+                   CAST(:sales7d AS numeric(14,3)),
+                   CAST(:sales30d AS numeric(14,3)),
+                   CAST(:expirationDays AS integer),
+                   CAST(:supplierLeadTimeDays AS integer),
+                   CAST(:context AS jsonb), :createdAt
             FROM product_store ps
             JOIN product p ON p.id = ps.product_id
             JOIN store s ON s.id = ps.store_id
@@ -143,7 +154,7 @@ public class FlowRepository {
       sql =
           sql.replace(
               " ORDER BY",
-              " AND COALESCE(pa.context ->> 'analysis_status', 'ANALYZED') = :analysisStatus ORDER BY");
+              " AND COALESCE(pa.analysis_status, 'ANALYZED') = :analysisStatus ORDER BY");
       parameters.put("analysisStatus", status);
     }
     return JpaNativeQuery.rows(entityManager, sql, parameters).stream().map(this::toFlow).toList();
