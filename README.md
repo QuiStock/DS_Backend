@@ -1,5 +1,10 @@
 # DS_Backend
 
+![Java](https://img.shields.io/badge/Java-25-ED8B00?logo=openjdk&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
+![Flyway](https://img.shields.io/badge/Flyway-database%20migrations-CC0200?logo=flyway&logoColor=white)
+
 ## Persistência PostgreSQL
 
 As rotas de produtos, análises, ações, filiais, dashboard e status ERP usam PostgreSQL. O
@@ -208,12 +213,5 @@ Self-profile editing, independent risks, action forms and role/status rules are 
 Auth and the AI repository are not modified. Consumers must no longer interpret HIGH/LOW
 as inventory risks. Apply Flyway V7 on existing databases, or use the complete updated
 `database/quistock-schema.sql` for a new empty database; do not execute both bootstrap and
-migration over the same schema. Unit of measure is not required for synchronization or
-analysis; each SKU represents a fixed product presentation (for example, Leite 1L and
-Leite 500 mL are separate products). Peers are selected by category and store only.
-See [product business rules](docs/product-business-rules.md) before changing product
-quantities, ERP synchronization or sales classification. The historical V7 migration and
-bootstrap schema retain `product.unit_of_measure` for migration compatibility, but the
-application does not read or write that column. No new migration or unit backfill is needed
-for this correction; other V7 changes remain required.
+migration over the same schema. Resynchronize the ERP to populate units before analysis.
 Order completion, receipt, cancellation and automatic promotion closure remain future work.
