@@ -14,6 +14,7 @@ class ActionAuditRepository {
   private static final String APPROVED = "APPROVED";
   private static final String REJECTED = "REJECTED";
   private static final String STATUS_KEY = "status";
+  private static final String TYPE_KEY = "type";
   private static final String PROMOTION_FROM_KEY = "promotion_valid_from";
   private static final String PROMOTION_UNTIL_KEY = "promotion_valid_until";
 
@@ -37,7 +38,7 @@ class ActionAuditRepository {
             data(
                 STATUS_KEY,
                 GENERATED,
-                "type",
+                TYPE_KEY,
                 log.actionType(),
                 "flow_id",
                 log.flowId(),
@@ -112,7 +113,7 @@ class ActionAuditRepository {
         JpaNativeQuery.parameters(
             "logId", logId,
             "status", snapshot.get(STATUS_KEY),
-            "type", snapshot.get("type"),
+            TYPE_KEY, snapshot.get(TYPE_KEY),
             "flowId", snapshot.get("flow_id"),
             "quantity", snapshot.get("quantity"),
             "desiredOrderDate", snapshot.get("desired_order_date"),
@@ -146,7 +147,7 @@ class ActionAuditRepository {
             "suggestionId", suggestionId,
             "logId", logId,
             "status", log.newData().get(STATUS_KEY),
-            "type", log.newData().get("type"),
+            TYPE_KEY, log.newData().get(TYPE_KEY),
             "flowId", log.newData().get("flow_id"),
             "validFrom", log.validFrom(),
             "validUntil", log.validUntil()));
