@@ -148,13 +148,7 @@ public class FlowRepository {
           INSERT INTO product_analysis_risk (product_analysis_id, risk_position, risk_code)
           VALUES (:analysisId, :riskPosition, :riskCode)
           """,
-          JpaNativeQuery.parameters(
-              "analysisId",
-              analysisId,
-              "riskPosition",
-              index + 1,
-              "riskCode",
-              risks.get(index)));
+          JpaNativeQuery.parameters("analysisId", analysisId, "riskPosition", index + 1, "riskCode", risks.get(index)));
     }
   }
 
@@ -174,12 +168,11 @@ public class FlowRepository {
             + " AND (CAST(:productErpId AS text) IS NULL OR (p.erp_id = :productErpId AND s.erp_id"
             + " = :storeErpId))"
             + scope.sql()
+            + (status == null
+                ? ""
+                : " AND COALESCE(pa.analysis_status, 'ANALYZED') = :analysisStatus")
             + " ORDER BY pa.created_at DESC, pa.id DESC";
     if (status != null) {
-      sql =
-          sql.replace(
-              " ORDER BY",
-              " AND COALESCE(pa.analysis_status, 'ANALYZED') = :analysisStatus ORDER BY");
       parameters.put("analysisStatus", status);
     }
     return JpaNativeQuery.rows(entityManager, sql, parameters).stream().map(this::toFlow).toList();

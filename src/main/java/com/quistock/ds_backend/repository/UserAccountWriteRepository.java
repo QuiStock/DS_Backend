@@ -88,9 +88,6 @@ public class UserAccountWriteRepository {
         INSERT INTO audit_event_user_account_detail (audit_event_id, role_code, email)
         VALUES (:auditEventId, :role, :email)
         """,
-        Map.of(
-            "auditEventId", auditEventId,
-            "role", role,
-            EMAIL_PARAMETER, email));
+        Map.of("auditEventId", auditEventId, "role", role, EMAIL_PARAMETER, email));
   }
 }
