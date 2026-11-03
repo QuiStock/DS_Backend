@@ -79,21 +79,14 @@ class ErpSnapshotRepository {
             ERP_ID_PARAMETER, erpId, NAME_PARAMETER, name, SYNC_ID_PARAMETER, syncId));
   }
 
-  long upsertProduct(
-      String erpId,
-      String name,
-      Long categoryId,
-      BigDecimal salePrice,
-      BigDecimal minimumStock,
-      long syncId) {
+  long upsertProduct(String erpId, String name, Long categoryId, long syncId) {
     return returnedId(
         """
         INSERT INTO product
-          (erp_id, sku, category_id, name, sale_price, minimum_stock_quantity, active, last_sync_id)
-        VALUES (:erpId, :sku, :categoryId, :name, :salePrice, :minimumStock, TRUE, :syncId)
+          (erp_id, sku, category_id, name, active, last_sync_id)
+        VALUES (:erpId, :sku, :categoryId, :name, TRUE, :syncId)
         ON CONFLICT (erp_id) DO UPDATE SET
           sku = EXCLUDED.sku, category_id = EXCLUDED.category_id, name = EXCLUDED.name,
-          sale_price = EXCLUDED.sale_price, minimum_stock_quantity = EXCLUDED.minimum_stock_quantity,
           active = TRUE, last_sync_id = EXCLUDED.last_sync_id
         RETURNING id
         """,
@@ -106,10 +99,6 @@ class ErpSnapshotRepository {
             categoryId,
             NAME_PARAMETER,
             name,
-            "salePrice",
-            salePrice,
-            "minimumStock",
-            minimumStock,
             SYNC_ID_PARAMETER,
             syncId));
   }
