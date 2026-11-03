@@ -131,8 +131,6 @@ class ErpSnapshotProcessor {
                     key.productErpId(),
                     ErpIdentifiers.required(firstBatch.productName(), "product name"),
                     categoryId,
-                    unitPrice,
-                    minimumStock,
                     context.syncId));
 
     persistBatches(key, productBatches, productId, storeId, context);

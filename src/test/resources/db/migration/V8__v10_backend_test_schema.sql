@@ -1,6 +1,14 @@
 -- Test-only schema evolution for the PostgreSQL Testcontainers database.
 -- Production schema changes are delivered separately in entrega modelagem.
 
+-- Match the normalized v10 product schema: commercial values belong to product_store.
+ALTER TABLE product
+  DROP CONSTRAINT IF EXISTS chk_product_sale_price,
+  DROP CONSTRAINT IF EXISTS chk_product_minimum_stock_quantity;
+ALTER TABLE product
+  DROP COLUMN IF EXISTS sale_price,
+  DROP COLUMN IF EXISTS minimum_stock_quantity;
+
 ALTER TABLE sale_item
   DROP CONSTRAINT IF EXISTS sale_item_product_id_fkey,
   DROP CONSTRAINT IF EXISTS chk_sale_item_quantity;

@@ -465,8 +465,8 @@ class PersistenceApiIntegrationTest {
         Long id =
             jdbc.queryForObject(
                 """
-            INSERT INTO product (erp_id, sku, name, category_id, sale_price)
-            SELECT ?, ?, 'Comparable product', category_id, 10 FROM product WHERE sku = ? RETURNING id
+            INSERT INTO product (erp_id, sku, name, category_id)
+            SELECT ?, ?, 'Comparable product', category_id FROM product WHERE sku = ? RETURNING id
             """,
                 Long.class,
                 sku + "-PEER" + index,
