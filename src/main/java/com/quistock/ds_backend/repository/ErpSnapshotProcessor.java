@@ -130,6 +130,7 @@ class ErpSnapshotProcessor {
                 snapshotRepository.upsertProduct(
                     key.productErpId(),
                     ErpIdentifiers.required(firstBatch.productName(), "product name"),
+                    ErpIdentifiers.clean(firstBatch.unitOfMeasure()),
                     categoryId,
                     context.syncId));
 

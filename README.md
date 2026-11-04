@@ -9,13 +9,16 @@
 
 As rotas de produtos, análises, ações, filiais, dashboard e status ERP usam PostgreSQL. O
 Flyway aplica as migrações em `src/main/resources/db/migration` ao iniciar a aplicação. Para
-instalação nova, crie o banco indicado em `DB_URL` e inicie a API. Em uma base já criada pelo
-script SQL anterior, o Flyway registra o baseline na versão 1 e aplica a migração incremental
-das versões seguintes. `V4` exige SKU de até 100 caracteres e preço, custo e validade em cada
-lote já sincronizado; corrija dados antigos que violem essas regras antes de migrar.
+uma instalação nova, crie o banco indicado em `DB_URL` e inicie a API. A cadeia de produção
+inclui `V8` (modelo relacional v10), `V11` (normalização dos campos JSON de negócio) e `V12`
+(remoção da tabela de login que não é usada); versões não existentes entre elas são históricas.
+`V4` exige SKU de até 100 caracteres e preço, custo e validade em cada lote já sincronizado;
+corrija dados antigos que violem essas regras antes de migrar.
 
-O script completo para execução manual está em [`database/quistock-schema.sql`](database/quistock-schema.sql).
-Use-o em banco novo; não o reaplique sobre tabelas existentes. Copie `.env.example` para `.env`
+O script consolidado para execução manual está em [`database/quistock-schema.sql`](database/quistock-schema.sql).
+Ele representa o mesmo estado final das migrações e deve ser usado somente em banco vazio, com
+`RUN_MIGRATIONS=false` durante a inicialização da API. Não execute o script e as migrações sobre
+o mesmo schema. Copie `.env.example` para `.env`
 e ajuste as credenciais, o endereço do ERP e as variáveis `AUTH_JWT_*` para a API de autenticação.
 
 ### Carga manual de usuários de desenvolvimento
@@ -211,7 +214,8 @@ No new migration is needed. Web/Mobile read `/flows/current`; the deprecated
 `POST /flows/analyze-login` only reads results. Explicit manual `/flows/analyze` remains.
 Self-profile editing, independent risks, action forms and role/status rules are preserved.
 Auth and the AI repository are not modified. Consumers must no longer interpret HIGH/LOW
-as inventory risks. Apply Flyway V7 on existing databases, or use the complete updated
-`database/quistock-schema.sql` for a new empty database; do not execute both bootstrap and
-migration over the same schema. Resynchronize the ERP to populate units before analysis.
+as inventory risks. Apply the pending Flyway migrations on existing databases, or use the
+consolidated `database/quistock-schema.sql` for a new empty database with migrations disabled;
+do not execute both bootstrap and migrations over the same schema. Resynchronize the ERP to
+populate units before analysis.
 Order completion, receipt, cancellation and automatic promotion closure remain future work.
