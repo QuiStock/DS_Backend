@@ -4,7 +4,6 @@ import com.quistock.ds_backend.model.dto.ErpBatchDTO;
 import com.quistock.ds_backend.util.ErpValueParser;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
-import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Repository;
 
@@ -32,67 +31,6 @@ class ErpSnapshotRepository {
                 Map.of())
             .getFirst();
     return JpaNativeQuery.longValue(row, "count").intValue();
-  }
-
-  long upsertRegion(String regionCode, long syncId) {
-    List<Map<String, Object>> matches = findRegionsByIdentity(regionCode);
-    if (matches.size() > 1) {
-      throw new IllegalStateException(
-          "The ERP region code and name resolve to different stored regions.");
-    }
-    if (matches.size() == 1) {
-      return updateRegion(matches.getFirst(), regionCode);
-    }
-
-    List<Map<String, Object>> inserted =
-        JpaNativeQuery.rows(
-            entityManager,
-            """
-            INSERT INTO region_type (code, name, active)
-            VALUES (:code, :name, TRUE)
-            ON CONFLICT DO NOTHING
-            RETURNING id
-            """,
-            JpaNativeQuery.parameters("code", regionCode, NAME_PARAMETER, regionCode));
-    if (!inserted.isEmpty()) {
-      return JpaNativeQuery.longValue(inserted.getFirst(), "id");
-    }
-
-    matches = findRegionsByIdentity(regionCode);
-    if (matches.size() == 1) {
-      return updateRegion(matches.getFirst(), regionCode);
-    }
-    throw new IllegalStateException(
-        "The ERP region could not be resolved to one stored region.");
-  }
-
-  private List<Map<String, Object>> findRegionsByIdentity(String regionCode) {
-    return JpaNativeQuery.rows(
-        entityManager,
-        """
-        SELECT id, code, name FROM region_type
-        WHERE code = :code OR name = :name
-        ORDER BY id
-        FOR UPDATE
-        """,
-        JpaNativeQuery.parameters("code", regionCode, NAME_PARAMETER, regionCode));
-  }
-
-  private long updateRegion(Map<String, Object> match, String regionCode) {
-    return returnedId(
-        """
-        UPDATE region_type
-        SET code = :code, name = :name, active = TRUE
-        WHERE id = :id
-        RETURNING id
-        """,
-        JpaNativeQuery.parameters(
-            "id",
-            JpaNativeQuery.longValue(match, "id"),
-            "code",
-            regionCode,
-            NAME_PARAMETER,
-            regionCode));
   }
 
   long upsertStore(String erpId, String name, Long regionId, long syncId) {
