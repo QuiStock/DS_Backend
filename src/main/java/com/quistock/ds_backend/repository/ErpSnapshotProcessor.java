@@ -104,8 +104,7 @@ class ErpSnapshotProcessor {
     Long regionId =
         regionCode == null
             ? null
-            : context.regionId(
-                regionCode, () -> regionRepository.upsertRegion(regionCode));
+            : context.regionId(regionCode, () -> regionRepository.upsertRegion(regionCode));
     long storeId =
         context.storeId(
             key.storeErpId(),
