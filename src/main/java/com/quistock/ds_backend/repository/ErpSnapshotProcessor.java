@@ -15,11 +15,15 @@ import org.springframework.transaction.annotation.Transactional;
 class ErpSnapshotProcessor {
   private static final int MAX_REGION_CODE_LENGTH = 50;
   private final ErpSnapshotRepository snapshotRepository;
+  private final ErpRegionRepository regionRepository;
   private final ErpSyncStateRepository stateRepository;
 
   ErpSnapshotProcessor(
-      ErpSnapshotRepository snapshotRepository, ErpSyncStateRepository stateRepository) {
+      ErpSnapshotRepository snapshotRepository,
+      ErpRegionRepository regionRepository,
+      ErpSyncStateRepository stateRepository) {
     this.snapshotRepository = snapshotRepository;
+    this.regionRepository = regionRepository;
     this.stateRepository = stateRepository;
   }
 
@@ -100,8 +104,7 @@ class ErpSnapshotProcessor {
     Long regionId =
         regionCode == null
             ? null
-            : context.regionId(
-                regionCode, () -> snapshotRepository.upsertRegion(regionCode, context.syncId));
+            : context.regionId(regionCode, () -> regionRepository.upsertRegion(regionCode));
     long storeId =
         context.storeId(
             key.storeErpId(),
@@ -130,6 +133,7 @@ class ErpSnapshotProcessor {
                 snapshotRepository.upsertProduct(
                     key.productErpId(),
                     ErpIdentifiers.required(firstBatch.productName(), "product name"),
+                    ErpIdentifiers.clean(firstBatch.unitOfMeasure()),
                     categoryId,
                     context.syncId));
 

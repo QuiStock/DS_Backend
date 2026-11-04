@@ -152,10 +152,41 @@ class PersistenceApiIntegrationTest {
     assertThat(apiDocs.at("/paths/~1flows~1analyze-login/post/deprecated").asBoolean()).isTrue();
     assertThat(apiDocs.path("paths").path("/profile").has("patch")).isTrue();
     seedAuthenticatedUser();
+    jdbc.update(
+        "INSERT INTO region_type (code, name, active) VALUES (?, ?, TRUE)",
+        "LEGACY-REGION-NORTH",
+        "REGION-NORTH");
     ERP_RESPONSE.set(initialErpPayload());
 
     JsonNode products = get("/products", 200);
     assertThat(products.size()).isEqualTo(3);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' "
+                    + "AND table_name = 'batch' AND column_name = 'sale_price'",
+                Integer.class))
+        .isZero();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT sale_price FROM product_store ps JOIN product p ON p.id = ps.product_id "
+                    + "WHERE p.erp_id = 'SKU-HIGH'",
+                java.math.BigDecimal.class))
+        .isEqualByComparingTo("8.10");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unit_of_measure FROM product WHERE erp_id = 'SKU-HIGH'", String.class))
+        .isEqualTo("UN");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM region_type WHERE code = 'REGION-NORTH' "
+                    + "AND name = 'REGION-NORTH'",
+                Integer.class))
+        .isEqualTo(1);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM region_type WHERE code = 'LEGACY-REGION-NORTH'",
+                Integer.class))
+        .isZero();
     assertThat(product("SKU-HIGH:STORE-1").path("current_stock").asInt()).isEqualTo(8);
     assertThat(products.get(0).path("name").asString()).isEqualTo("Juice");
     assertThat(products.get(1).path("name").asString()).isEqualTo("Milk");
@@ -352,6 +383,12 @@ class PersistenceApiIntegrationTest {
 
     ERP_RESPONSE.set(updatedErpPayload());
     assertThat(erpSyncService.syncNow()).isTrue();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT sale_price FROM product_store ps JOIN product p ON p.id = ps.product_id "
+                    + "WHERE p.erp_id = 'SKU-HIGH'",
+                java.math.BigDecimal.class))
+        .isEqualByComparingTo("8.25");
     assertThat(get("/products", 200).size()).isEqualTo(1);
     assertThat(
             jdbc.queryForObject("SELECT COUNT(*) FROM batch WHERE active = FALSE", Integer.class))
@@ -972,7 +1009,7 @@ class PersistenceApiIntegrationTest {
     [
       {
         "id":"HIGH-1","codigo_produto_erp":"SKU-HIGH","nome_produto":"Milk",
-        "categoria":"Dairy","num_lote":"H-1","data_validade":"%s",
+        "categoria":"Dairy","unidade_medida":"UN","num_lote":"H-1","data_validade":"%s",
         "quantidade":"3","preco":"7.90","custo":"5.20",
         "codigo_filial_erp":"STORE-1","filial":"North Branch",
         "region_id":"REGION-NORTH",
@@ -981,7 +1018,7 @@ class PersistenceApiIntegrationTest {
       },
       {
         "id":"HIGH-2","codigo_produto_erp":"SKU-HIGH","nome_produto":"Milk",
-        "categoria":"Dairy","num_lote":"H-2","data_validade":"%s",
+        "categoria":"Dairy","unidade_medida":"UN","num_lote":"H-2","data_validade":"%s",
         "quantidade":"5","preco":"8.10","custo":"5.40",
         "codigo_filial_erp":"STORE-1","filial":"North Branch",
         "region_id":"REGION-NORTH",
@@ -1014,7 +1051,7 @@ class PersistenceApiIntegrationTest {
     return """
     [{
       "id":"HIGH-1","codigo_produto_erp":"SKU-HIGH","nome_produto":"Milk",
-      "categoria":"Dairy","num_lote":"H-1","data_validade":"%s",
+      "categoria":"Dairy","unidade_medida":"UN","num_lote":"H-1","data_validade":"%s",
       "quantidade":"10","preco":"8.25","custo":"5.50",
       "codigo_filial_erp":"STORE-1","filial":"North Branch",
       "region_id":"REGION-NORTH",

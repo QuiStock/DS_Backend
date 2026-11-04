@@ -33,17 +33,6 @@ class ErpSnapshotRepository {
     return JpaNativeQuery.longValue(row, "count").intValue();
   }
 
-  long upsertRegion(String regionCode, long syncId) {
-    return returnedId(
-        """
-        INSERT INTO region_type (code, name, active)
-        VALUES (:code, :name, TRUE)
-        ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, active = TRUE
-        RETURNING id
-        """,
-        JpaNativeQuery.parameters("code", regionCode, NAME_PARAMETER, regionCode));
-  }
-
   long upsertStore(String erpId, String name, Long regionId, long syncId) {
     return returnedId(
         """
@@ -79,14 +68,16 @@ class ErpSnapshotRepository {
             ERP_ID_PARAMETER, erpId, NAME_PARAMETER, name, SYNC_ID_PARAMETER, syncId));
   }
 
-  long upsertProduct(String erpId, String name, Long categoryId, long syncId) {
+  long upsertProduct(
+      String erpId, String name, String unitOfMeasure, Long categoryId, long syncId) {
     return returnedId(
         """
         INSERT INTO product
-          (erp_id, sku, category_id, name, active, last_sync_id)
-        VALUES (:erpId, :sku, :categoryId, :name, TRUE, :syncId)
+          (erp_id, sku, category_id, unit_of_measure, name, active, last_sync_id)
+        VALUES (:erpId, :sku, :categoryId, :unitOfMeasure, :name, TRUE, :syncId)
         ON CONFLICT (erp_id) DO UPDATE SET
-          sku = EXCLUDED.sku, category_id = EXCLUDED.category_id, name = EXCLUDED.name,
+          sku = EXCLUDED.sku, category_id = EXCLUDED.category_id,
+          unit_of_measure = EXCLUDED.unit_of_measure, name = EXCLUDED.name,
           active = TRUE, last_sync_id = EXCLUDED.last_sync_id
         RETURNING id
         """,
@@ -97,6 +88,8 @@ class ErpSnapshotRepository {
             erpId,
             "categoryId",
             categoryId,
+            "unitOfMeasure",
+            unitOfMeasure,
             NAME_PARAMETER,
             name,
             SYNC_ID_PARAMETER,
@@ -112,7 +105,6 @@ class ErpSnapshotRepository {
     if (quantity == null) {
       quantity = BigDecimal.ZERO;
     }
-    BigDecimal salePrice = ErpValueParser.toBigDecimal(batch.price());
     BigDecimal unitCost = ErpValueParser.toBigDecimal(batch.cost());
     String qualityCertificate =
         batch.qualityCertificate() == null ? null : batch.qualityCertificate().toString();
@@ -122,15 +114,15 @@ class ErpSnapshotRepository {
         """
         INSERT INTO batch (
           erp_id, batch_number, product_id, store_id, expiration_date, entry_date,
-          sale_price, unit_cost, current_balance, quality_certificate, active, last_sync_id
+          unit_cost, current_balance, quality_certificate, active, last_sync_id
         ) VALUES (
           :erpId, :batchNumber, :productId, :storeId, :expirationDate, :entryDate,
-          :salePrice, :unitCost, :balance, :qualityCertificate, TRUE, :syncId
+          :unitCost, :balance, :qualityCertificate, TRUE, :syncId
         )
         ON CONFLICT (erp_id) DO UPDATE SET
           batch_number = EXCLUDED.batch_number, product_id = EXCLUDED.product_id,
           store_id = EXCLUDED.store_id, expiration_date = EXCLUDED.expiration_date,
-          entry_date = EXCLUDED.entry_date, sale_price = EXCLUDED.sale_price,
+          entry_date = EXCLUDED.entry_date,
           unit_cost = EXCLUDED.unit_cost, current_balance = EXCLUDED.current_balance,
           quality_certificate = EXCLUDED.quality_certificate, active = TRUE,
           last_sync_id = EXCLUDED.last_sync_id
@@ -148,8 +140,6 @@ class ErpSnapshotRepository {
             ErpValueParser.toLocalDate(batch.expirationDate()),
             "entryDate",
             ErpIdentifiers.databaseTimestamp(ErpValueParser.toInstant(batch.entryDate())),
-            "salePrice",
-            salePrice,
             "unitCost",
             unitCost,
             "balance",

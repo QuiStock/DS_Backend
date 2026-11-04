@@ -1,5 +1,77 @@
--- Test-only schema evolution for the PostgreSQL Testcontainers database.
--- Production schema changes are delivered separately in entrega modelagem.
+-- Normalize the legacy v9 schema to the v10 relational model used by 2ano_ds_oficial.
+
+-- Preserve legacy product/store values before removing their duplicated product-level columns.
+WITH batch_pairs AS (
+  SELECT product_id, store_id, BOOL_OR(active) AS active
+  FROM batch
+  GROUP BY product_id, store_id
+)
+INSERT INTO product_store (
+  product_id, store_id, minimum_stock_quantity, sale_price, unit_cost, active
+)
+SELECT bp.product_id, bp.store_id, p.minimum_stock_quantity,
+       latest_price.sale_price, latest_cost.unit_cost, bp.active
+FROM batch_pairs bp
+JOIN product p ON p.id = bp.product_id
+LEFT JOIN LATERAL (
+  SELECT b.sale_price
+  FROM batch b
+  WHERE b.product_id = bp.product_id AND b.store_id = bp.store_id
+    AND b.sale_price IS NOT NULL
+  ORDER BY b.entry_date DESC NULLS LAST, b.id DESC
+  LIMIT 1
+) latest_price ON TRUE
+LEFT JOIN LATERAL (
+  SELECT b.unit_cost
+  FROM batch b
+  WHERE b.product_id = bp.product_id AND b.store_id = bp.store_id
+    AND b.unit_cost IS NOT NULL
+  ORDER BY b.entry_date DESC NULLS LAST, b.id DESC
+  LIMIT 1
+) latest_cost ON TRUE
+ON CONFLICT (product_id, store_id) DO NOTHING;
+
+UPDATE product_store ps
+SET minimum_stock_quantity = COALESCE(ps.minimum_stock_quantity, p.minimum_stock_quantity),
+    sale_price = COALESCE(
+      ps.sale_price,
+      (
+        SELECT b.sale_price
+        FROM batch b
+        WHERE b.product_id = ps.product_id AND b.store_id = ps.store_id
+          AND b.sale_price IS NOT NULL
+        ORDER BY b.entry_date DESC NULLS LAST, b.id DESC
+        LIMIT 1
+      ),
+      p.sale_price
+    ),
+    unit_cost = COALESCE(
+      ps.unit_cost,
+      (
+        SELECT b.unit_cost
+        FROM batch b
+        WHERE b.product_id = ps.product_id AND b.store_id = ps.store_id
+          AND b.unit_cost IS NOT NULL
+        ORDER BY b.entry_date DESC NULLS LAST, b.id DESC
+        LIMIT 1
+      )
+    )
+FROM product p
+WHERE p.id = ps.product_id;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM product p
+    WHERE (p.sale_price IS NOT NULL OR p.minimum_stock_quantity IS NOT NULL)
+      AND NOT EXISTS (SELECT 1 FROM product_store ps WHERE ps.product_id = p.id)
+  ) THEN
+    RAISE EXCEPTION
+      'V8 aborted: product-level price/stock data has no product_store row to preserve it.';
+  END IF;
+END;
+$$;
 
 -- Match the normalized v10 product schema: commercial values belong to product_store.
 ALTER TABLE product
@@ -8,6 +80,28 @@ ALTER TABLE product
 ALTER TABLE product
   DROP COLUMN IF EXISTS sale_price,
   DROP COLUMN IF EXISTS minimum_stock_quantity;
+
+-- Sale price belongs to product_store, never to an individual inventory batch.
+ALTER TABLE batch
+  DROP CONSTRAINT IF EXISTS chk_batch_prices,
+  DROP COLUMN IF EXISTS sale_price,
+  DROP CONSTRAINT IF EXISTS chk_batch_unit_cost;
+ALTER TABLE batch
+  ADD CONSTRAINT chk_batch_unit_cost CHECK (unit_cost >= 0);
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM sale_item si
+    JOIN batch b ON b.id = si.batch_id
+    WHERE si.product_id IS DISTINCT FROM b.product_id
+  ) THEN
+    RAISE EXCEPTION
+      'V8 aborted: sale_item.product_id conflicts with the product identified by batch_id.';
+  END IF;
+END;
+$$;
 
 ALTER TABLE sale_item
   DROP CONSTRAINT IF EXISTS sale_item_product_id_fkey,
@@ -26,6 +120,27 @@ ALTER TABLE inventory_movement
   DROP CONSTRAINT IF EXISTS fk_inventory_movement_batch_product_store,
   DROP CONSTRAINT IF EXISTS fk_inventory_movement_sale_item_context,
   DROP CONSTRAINT IF EXISTS chk_inventory_movement_quantity;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM inventory_movement im
+    LEFT JOIN sale_item si ON si.id = im.sale_item_id
+    LEFT JOIN batch b ON b.id = CASE
+      WHEN im.sale_item_id IS NULL THEN im.batch_id
+      ELSE si.batch_id
+    END
+    WHERE b.id IS NULL
+       OR im.product_id IS DISTINCT FROM b.product_id
+       OR im.store_id IS DISTINCT FROM b.store_id
+       OR (im.sale_item_id IS NOT NULL AND im.batch_id IS NOT NULL
+           AND im.batch_id IS DISTINCT FROM si.batch_id)
+  ) THEN
+    RAISE EXCEPTION
+      'V8 aborted: inventory_movement batch/product/store references conflict.';
+  END IF;
+END;
+$$;
 ALTER TABLE inventory_movement
   ALTER COLUMN batch_id DROP NOT NULL,
   DROP COLUMN product_id,
@@ -120,6 +235,29 @@ WHERE s.product_analysis_id IS NULL
 UPDATE suggestion
 SET product_store_id = NULL
 WHERE product_analysis_id IS NOT NULL;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM suggestion s
+    JOIN product_analysis pa ON pa.id = s.product_analysis_id
+    WHERE s.product_id IS DISTINCT FROM pa.product_id
+       OR s.store_id IS DISTINCT FROM pa.store_id
+  ) THEN
+    RAISE EXCEPTION
+      'V8 aborted: suggestion product/store do not match its product_analysis.';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM suggestion s
+    WHERE s.product_analysis_id IS NULL
+      AND s.product_store_id IS NULL
+  ) THEN
+    RAISE EXCEPTION
+      'V8 aborted: a manual suggestion has no matching product_store row.';
+  END IF;
+END;
+$$;
 DROP INDEX IF EXISTS ix_suggestion_pending_product_store_type;
 DROP INDEX IF EXISTS uq_suggestion_product_analysis;
 ALTER TABLE suggestion
